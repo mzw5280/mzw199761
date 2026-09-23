@@ -49,8 +49,8 @@ from telegram.ext import (
 #  CONFIG / CONSTANTS
 # ==============================================================================
 
-BOT_TOKEN = "8902917967:AAGV_4oG7lsFx7HXGlVYmiLaiCHXUbS8orw"
-ADMIN_IDS = [8338810698]
+BOT_TOKEN = "os.environ.get("BOT_TOKEN")"
+ADMIN_IDS = [7294591323]
 
 FILE_PATH = "allinone.txt"            # valid (HIT) codes are appended here
 LAST_RUN_FILE = "last_run.txt"        # anti time-rollback watchdog
@@ -115,8 +115,8 @@ user_scanners = {}      # user_id -> scanner-state dict
 def show_banner():
     line = "=" * 60
     print(bcyan + line)
-    print("   ⚡ SAGE  ⚡   ")
-    print("        Telegram @Htun     ")
+    print("   ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸   ")
+    print("        Telegram @mzw199761     ")
     print(line + reset)
 
 
