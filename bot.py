@@ -49,7 +49,7 @@ from telegram.ext import (
 #  CONFIG / CONSTANTS
 # ==============================================================================
 
-BOT_TOKEN = "8858819080:AAGdnoc2wdi1UuslhkwPZPaYkk8LVipYjIo"
+BOT_TOKEN = "8858819080:AAFZV2QIcZ8ZcIr8navp0y-cG31JYvH7NWk"
 ADMIN_IDS = [7294591323]
 
 FILE_PATH = "allinone.txt"            # valid (HIT) codes are appended here
