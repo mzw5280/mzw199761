@@ -2,3 +2,4 @@ pyTelegramBotAPI
 ddddocr
 numpy
 opencv-python-headless
+aiohttp_socks
