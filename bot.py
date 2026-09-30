@@ -191,7 +191,7 @@ async def start(message):
 ⚠️ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။
 
 PAID USER ဖြစ်ရန် အောက်ပါ Menu မှ PAID USER ကိုနှိပ်ပါ။
-👨‍💻 Admin: {@mzw199761}"""
+👨‍💻 "Admin:@mzw199761"
     
     await bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_keyboard())
 
