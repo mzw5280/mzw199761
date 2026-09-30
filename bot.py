@@ -43,7 +43,7 @@ async def limit_speed():
 # ════════════════════════════════════════════════════════════════
 #  GLOBAL STATE
 # ════════════════════════════════════════════════════════════════
-bot = AsyncTeleBot(bot token)
+bot = AsyncTeleBot(BOT_TOKEN)
 user_data = {}
 scan_tasks = {}
 success_texts = {}
@@ -704,7 +704,7 @@ async def saved_codes(message):
         parts.append(f"✅ **Success Codes** ({len(success)})")
         parts.extend(success[:20])
     if limited:
-        parts.append(f"\n⚠️ **Limited Codes** ({len(limited)})")
+        parts.append(f"\n⚠️️ **Limited Codes** ({len(limited)})")
         parts.extend(limited[:20])
 
     await bot.send_message(chat_id, "\n\n".join(parts), parse_mode="Markdown", reply_markup=main_menu())
@@ -928,4 +928,4 @@ async def main():
         await _connector.close()
 
 if __name__ == '__main__':
-    asyncio.run(main()) 
+    asyncio.run(main())
