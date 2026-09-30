@@ -2,4 +2,4 @@ python-telegram-bot
 ddddocr
 numpy
 opencv-python-headless
-aiohttp_sock
+aiohttp_socks
