@@ -3,7 +3,7 @@
 """
 ================================================================================
  sirzipp.py  —  ⚡ SAGE ⚡
- Starlink (Ruijie) Voucher Scanner + Telegram Bot   |   Telegram @Htun
+ Starlink (Ruijie) Voucher Scanner + Telegram Bot   |   Telegram @mzw1mzw99761
 --------------------------------------------------------------------------------
  GitHub license system ကို ဖြုတ်ပြီး ကုဒ်ကျမြနါအောင် ပြင်ဆင်ထားသည်။
  Requires:
@@ -49,8 +49,8 @@ from telegram.ext import (
 #  CONFIG / CONSTANTS
 # ==============================================================================
 
-BOT_TOKEN = "8902917967:AAGV_4oG7lsFx7HXGlVYmiLaiCHXUbS8orw"
-ADMIN_IDS = [8338810698]
+BOT_TOKEN = "8858819080:AAGdnoc2wdi1UuslhkwPZPaYkk8LVipYjIo"
+ADMIN_IDS = [7294591323]
 
 FILE_PATH = "allinone.txt"            # valid (HIT) codes are appended here
 LAST_RUN_FILE = "last_run.txt"        # anti time-rollback watchdog
@@ -74,9 +74,9 @@ CAPTCHA_VERIFY_URL = PORTAL_BASE + "/api/auth/captcha/verify"
 BALANCE_API = PORTAL_BASE + "/api/auth/balance/getBalance/"
 
 # --- code char sets ---------------------------------------------------------
-CHARSET_DIGITS = "012345678"
-CHARSET_ABC = "abcdefghijkmnpqrstuvwxyz"
-CHARSET_MIX = "2345678abcdefghijkmnpqrstuvwxyz"
+CHARSET_DIGITS = "0123456789"
+CHARSET_ABC = "abcdefghijkmnopqrstuvwxyz"
+CHARSET_MIX = "0123456789abcdefghijkmnopqrstuvwxyz"
 
 MODES = {
     "num6": "Number 6",
