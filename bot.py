@@ -7,7 +7,7 @@ from aiohttp import web
 import cv2, ddddocr, numpy as np
 from collections import deque
 
-BOT_TOKEN = "8858819080:AAFZV2QIcZ8ZcIr8navp0y-cG31JYvH7NWk"
+BOT_TOKEN = "8858819080:AAGJNk5Hq1X0E95bBXjvSUFBuT2-N0iRTKY"
 ADMIN_ID = "7294591323"
 
 # ════════════════════════════════════════════════════════════════
