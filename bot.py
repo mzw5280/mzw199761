@@ -183,7 +183,7 @@ async def start(message):
 
 အောက်ပါ Menu မှ သင်လိုချင်တာကိုရွေးချယ်ပါ။"""
     else:
-        welcome_text = f"""✨ STAR LINK CODE HACK ✨
+        welcome_text = "✨ STAR LINK CODE HACK ✨"
 
 🪪 NAME: {user_name}
 📜 USER ID: {user_id}
