@@ -7,12 +7,11 @@ from aiohttp import web
 import cv2, ddddocr, numpy as np
 from collections import deque
 
-BOT_TOKEN = "8633805405:AAHIZ2VJfX7stoE9iM6WEmFzsAJAo365W6Q"
+BOT_TOKEN = "8858819080:AAGryeFlQ5fO5lp-CirEFSw7z7ZnPOJNW_I"
 ADMIN_ID = "7294591323"
 
 # ════════════════════════════════════════════════════════════════
-#  ​ရောင်ရန်မဟုပါ သကယ်လို့​ရောင် ခြင်စိတ်ဖစ်လာရင်
-#            ဖင်သာ​ပြေးခံပါ ════════════════════════════════════════════════════════════════
+#  ​⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸══════════════════════════════════════════════════
 CONCURRENCY = 15000
 BATCH_SIZE = 10000
 TIMEOUT = 100
