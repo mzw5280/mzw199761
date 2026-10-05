@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ==========================================================================
-⚡ RUIJIE ASYNC EXTREME ⚡
- Starlink Voucher Scanner + Telegram Bot  |  Telegram https://t.me/mzw199761
+⚡ RUIJIE ASYNC EXTREME (LORD OF DARKNESS) ⚡
+ Starlink (Ruijie) Voucher Scanner + Telegram Bot  |  Telegram https://t.me/+WC-PYFUiblA2NDY9
 --------------------------------------------------------------------------
  FULL FEATURES MAINTAINED (LOGIC UNCHANGED)
- REGULAR TEXT PROSE AND UI FORMATTED TO THE
- STRICTLY NO MYANMAR TEXT .
+ REGULAR TEXT PROSE AND UI FORMATTED TO "LORD OF DARKNESS" THEME
+ STRICTLY NO MYANMAR TEXT IN CODE.
 ==========================================================================
 """
 
@@ -48,9 +48,10 @@ from telegram.ext import (
 #  CONFIG
 # ==============================================================================
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
+BOT_TOKEN1 = os.environ.get('BOT_TOKEN1')
+BOT_TOKEN2 = os.environ.get('BOT_TOKEN2')
 
-ADMIN_IDS = os.environ.get('ADMIN_IDS', '')
+ADMIN_IDS = os.environ.get('ADMIN_IDS', '').split(',')
 
 # ==============================================================================
 #  FILE PATHS
@@ -103,18 +104,18 @@ _CHARSET_ABC_T = tuple(CHARSET_ABC)
 _CHARSET_MIX_T = tuple(CHARSET_MIX)
 
 MODES = {
-    "num6": "💠 06 • NUM",
-    "num7": "💠 07 • NUM",
-    "num8": "💠 08 • NUM",
-    "num9": "💠 09 • NUM",
-    "eng6": "❄️06 • ENG",
-    "eng7": "❄️07 • ENG",
-    "eng8": "❄️ 08 • ENG",
-    "mix6": "Ⓜ️ 06 • MIX",
-    "mix7": "Ⓜ️ 07 • MIX",
-    "mix8": "Ⓜ️ 08 • MIX",
-    "abc6": "🆎 06 • ABC",
-    "custom":"📝 Custom",
+    "num6": "🩸 06 • NUM",
+    "num7": "🩸 07 • NUM",
+    "num8": "🩸 08 • NUM",
+    "num9": "🩸 09 • NUM",
+    "eng6": "🦇 06 • ENG",
+    "eng7": "🦇 07 • ENG",
+    "eng8": "🦇 08 • ENG",
+    "mix6": "💀 06 • MIX",
+    "mix7": "💀 07 • MIX",
+    "mix8": "💀 08 • MIX",
+    "abc6": "📜 06 • ABC",
+    "custom": "🔮 Custom",
 }
 
 # ==============================================================================
@@ -169,10 +170,10 @@ def ensure_files_exist():
 def show_banner():
     line = "═" * 60
     print(bred + line)
-    print("   ⚔️  Thank You For Use  ⚔️   ")
-    print("            Telegram @mzw199761  ")
+    print("   ⚔️  LORD OF DARKNESS • ASYNC EXTREME  ⚔️   ")
+    print("            Telegram @mzw199761            ")
     print(line + reset)
-    print(white + "Summoning  & verifying domain authorization..." + reset)
+    print(white + "Summoning darkness & verifying domain authorization..." + reset)
 
 
 def encrypt_key_data(key_str, expiry_str):
@@ -212,13 +213,13 @@ def display_remaining_time(expiry_date):
         time_str = f"{hours} hr {minutes} min"
     else:
         time_str = f"{minutes} min"
-    print(yellow + f"[*]  Pact Remaining: {time_str}  ")
+    print(yellow + f"[*] Darkness Pact Remaining: {time_str}  ")
     print(f"[-] Pact Expiration: ({expiry_date.strftime('%Y-%m-%d %H:%M')}) " + reset)
 
 
 def check_approval():
     if not os.path.exists(OWNER_LICENSE_FILE):
-        print(bgreen + "[+]  Portal Granted Access!" + reset)
+        print(bgreen + "[+] Dark Portal Granted Access!" + reset)
         return
     try:
         with open(OWNER_LICENSE_FILE) as f:
@@ -234,14 +235,14 @@ def check_approval():
                     except ValueError:
                         continue
                     if datetime.datetime.now() >= expiry_date:
-                        print(bred + f"[!] OWNER  LICENSE EXPIRED" + reset)
+                        print(bred + f"[!] OWNER DARK LICENSE EXPIRED" + reset)
                         sys.exit(1)
-                    print(bgreen + "[+]  Portal Granted Access!" + reset)
+                    print(bgreen + "[+] Dark Portal Granted Access!" + reset)
                     display_remaining_time(expiry_date)
                     return
     except Exception as e:
-        print(yellow + f"[License]  Error: {e}" + reset)
-    print(bgreen + "[+]  Portal Granted Access!" + reset)
+        print(yellow + f"[License] Darkness Error: {e}" + reset)
+    print(bgreen + "[+] Dark Portal Granted Access!" + reset)
 
 
 # ==============================================================================
@@ -285,7 +286,7 @@ def load_paid_keys_local():
                 if encrypt_key_data(entry["key_hash"], entry["expiry"]) != entry["signature"]:
                     continue
                 keys[entry["key_hash"]] = {"expiry": entry["expiry"], "plan": entry["plan"]}
-        print(bgreen + f"[PaidKeys]  Seal Loaded {len(keys)} Keys" + reset)
+        print(bgreen + f"[PaidKeys] Dark Seal Loaded {len(keys)} Keys" + reset)
     except Exception as e:
         print(bred + f"[PaidKeys] Load Error: {e}" + reset)
     return keys
@@ -314,7 +315,8 @@ def validate_paid_key(user_key):
 
 
 def is_user_authorized(user_id):
-    if user_id in ADMIN_IDS:
+    if str(user_id) in ADMIN_IDS:
+
         return True
     entry = paid_users.get(user_id)
     if not entry:
@@ -359,7 +361,7 @@ def load_registered_users():
                 continue
             if datetime.datetime.now() < expiry:
                 paid_users[int(uid_str)] = {"key": entry.get("key", ""), "expiry": expiry, "plan": entry.get("plan", "paid")}
-        print(bgreen + f"[PaidUsers]  Realm Restored {len(paid_users)} Souls" + reset)
+        print(bgreen + f"[PaidUsers] Dark Realm Restored {len(paid_users)} Souls" + reset)
     except Exception as e:
         print(yellow + f"[PaidUsers] Load error: {e}" + reset)
 
@@ -430,7 +432,7 @@ class ProxyManager:
             random.shuffle(self.proxies)
             self.bad_proxies = []
             self.fail_counts = {}
-            msg = f"[ProxyManager]  Proxies Summoned: {len(self.proxies)}"
+            msg = f"[ProxyManager] Dark Proxies Summoned: {len(self.proxies)}"
             if invalid_count:
                 msg += f" ({invalid_count} Banished)"
             print(bgreen + msg + reset)
@@ -877,7 +879,7 @@ async def worker(worker_id, login_url, captcha_base_url, verify_url, headers, us
                     state["hits"] += 1
                     state["hit_list"].append(code)
                     state["last_hit"] = code
-                    state["recent_logs"].append(f"🔥 HIT: {code}")
+                    state["recent_logs"].append(f"🔥 DARK HIT: {code}")
                     plan_name, time_str = await check_balance(sid, code, user_id, proxy)
                     now = datetime.datetime.now()
                     state["hit_details"].append({
@@ -956,43 +958,43 @@ async def live_dashboard_updater(context, user_id):
                 max_show = 90
                 if len(hit_lines) > max_show:
                     hidden = len(hit_lines) - max_show
-                    hit_lines_display = [f"... ({hidden} hidden in ) ..."] + hit_lines[-max_show:]
+                    hit_lines_display = [f"... ({hidden} hidden in darkness) ..."] + hit_lines[-max_show:]
                 else:
                     hit_lines_display = hit_lines
                 hit_section = (
-                    f"🔨 * HITS  •  {total_hits}**\n"
+                    f"🩸 **DARK HARVEST HITS  •  {total_hits}**\n"
                     "╭────────────────────╮\n"
                     + "\n".join(hit_lines_display) + "\n"
                     "╰────────────────────╯"
                 )
             else:
                 hit_section = (
-                    f"🔨 ** HITS  •  {total_hits}**\n"
+                    f"🩸 **DARK HARVEST HITS  •  {total_hits}**\n"
                     "╭────────────────────╮\n"
-                    "│  🖤 No vouchers yet\n"
+                    "│  🖤 No soul vouchers reaped yet\n"
                     "╰────────────────────╯"
                 )
 
             text = (
-                "⚔️ **Thank You For Use** ⚔️\n"
-                "❄️ @mzw199761 ❄️\n"
+                "⚔️ **LORD OF DARKNESS • RITUAL IN PROGRESS** ⚔️\n"
+                "👑 DARK REALM CONTROL • EXTREME RITUAL 🔮\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"⏰TIME: {state['tried']:,}\n"
-                f"🔥Hits: {state['hits']}\n"
-                f"⚠️ Limits: {state['limits']}\n"
-                f"❌ Net Errors: {state['net']}\n"
-                f"⚡ Speed: {speed_cpm:,} c/m\n"
-                f"📶 Active : {active}\n"
+                f"👁️ Souls Tested: {state['tried']:,}\n"
+                f"🩸 Dark Hits: {state['hits']}\n"
+                f"⚠️ Void Limits: {state['limits']}\n"
+                f"❌ Abyss Net Errors: {state['net']}\n"
+                f"⚡ Ritual Speed: {speed_cpm:,} c/m\n"
+                f"🕷️ Active Thralls: {active}\n"
                 f"🗡️ Last Hit: `{state['last_hit'] or '—'}`\n"
-                f"📊 Current Code: `{state['current_code'] or '—'}`\n"
-                f"⌛ Whispers: {last_log}\n"
+                f"🔮 Current Code: `{state['current_code'] or '—'}`\n"
+                f"📜 Abyss Whispers: {last_log}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"{hit_section}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━"
             )
 
             markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛑 STOP • ⚡", callback_data="stop_scan")]
+                [InlineKeyboardButton("🛑 BANISH RITUAL • ⚡", callback_data="stop_scan")]
             ])
 
             try:
@@ -1017,42 +1019,42 @@ async def live_dashboard_updater_final(context, user_id, state):
     hit_lines = []
     for hd in state.get("hit_details", []):
         hit_lines.append(
-            f" `{hd['code']}` ❤️: {hd.get('plan', 'Unknown')}, ⏰ : {hd.get('time_str', 'N/A')}"
+            f" `{hd['code']}` 🗡️: {hd.get('plan', 'Unknown')}, ⏳ : {hd.get('time_str', 'N/A')}"
         )
 
     total_hits = state.get("hits", 0)
     if hit_lines:
         hit_section = (
-            f"🔨 **HITS  •  {total_hits}**\n"
+            f"🩸 **DARK HARVEST HITS  •  {total_hits}**\n"
             "╭────────────────────╮\n"
             + "\n".join(hit_lines) + "\n"
             "╰────────────────────╯"
         )
     else:
         hit_section = (
-            f"🔨 ** HITS  •  {total_hits}**\n"
+            f"🩸 **DARK HARVEST HITS  •  {total_hits}**\n"
             "╭────────────────────╮\n"
-            "│  🖤 No  vouchers  yet\n"
+            "│  🖤 No soul vouchers reaped yet\n"
             "╰────────────────────╯"
         )
 
     final_text = (
-        "💀 **Thank You For Use** 💀\n"
-        "❄️ @mzw199761 ❄️\n"
+        "💀 **LORD OF DARKNESS • RITUAL ENDED** 💀\n"
+        "👑 DARK REALM CONTROL • FINAL REPORT 🔮\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ Time: {state['tried']:,}\n"
-        f"🔥 Hits: {state['hits']}\n"
-        f"⚠️ Limits: {state['limits']}\n"
-        f"❌ Net Errors: {state['net']}\n"
-        f"⚡  Speed: {speed_cpm:,} c/m\n"
-        f"📊 Active Thralls: {active}\n"
+        f"👁️ Souls Tested: {state['tried']:,}\n"
+        f"🩸 Dark Hits: {state['hits']}\n"
+        f"⚠️ Void Limits: {state['limits']}\n"
+        f"❌ Abyss Net Errors: {state['net']}\n"
+        f"⚡ Ritual Speed: {speed_cpm:,} c/m\n"
+        f"🕷️ Active Thralls: {active}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{hit_section}\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("‹ 🔁 RETURN  ›", callback_data="btn_back_main")]
+        [InlineKeyboardButton("‹ 🦇 RETURN TO ALTARE ›", callback_data="btn_back_main")]
     ])
 
     try:
@@ -1097,9 +1099,9 @@ async def run_user_scanner(context, user_id):
     if active_count <= 0:
         await context.bot.send_message(
             chat_id=user_id,
-            text="⚠️ **No  Proxies Found in the Abyss!**\n\n"
-                 "🕸️ **Send proxy list to unleash the  spell.**\n\n"
-                 "Press ➕ Add Proxies button to add proxies.",
+            text="⚠️ **No Dark Proxies Found in the Abyss!**\n\n"
+                 "🕸️ **Send proxy list to unleash the dark spell.**\n\n"
+                 "Press ➕ Summon Proxies button to add proxies.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_main_menu_markup())
         state["running"] = False
@@ -1107,7 +1109,7 @@ async def run_user_scanner(context, user_id):
 
     dash = await context.bot.send_message(
         chat_id=user_id,
-        text="🔮 Awakening  ritual dashboard...")
+        text="🔮 Awakening dark ritual dashboard...")
     state["dash_msg_id"] = dash.message_id
 
     headers = build_headers()
@@ -1138,34 +1140,34 @@ async def run_user_scanner(context, user_id):
 
 def get_main_menu_markup():
     keyboard = [
-        [InlineKeyboardButton("🔗  PORTAL   🔮", callback_data="btn_update_portal"),
-         InlineKeyboardButton("⚙️  MODES  📜", callback_data="btn_mode_menu")],
-        [InlineKeyboardButton("⚡  SCAN  ⚡", callback_data="btn_start_scanner"),
+        [InlineKeyboardButton("🔮  PORTAL REALM  🔮", callback_data="btn_update_portal"),
+         InlineKeyboardButton("📜  DARK MODES  📜", callback_data="btn_mode_menu")],
+        [InlineKeyboardButton("⚡  SUMMON SCAN  ⚡", callback_data="btn_start_scanner"),
          InlineKeyboardButton("🛑  BANISH SCAN  🛑", callback_data="stop_scan")],
         [InlineKeyboardButton("👁️  ABYSS STATUS  👁️️", callback_data="btn_proxy_status"),
          InlineKeyboardButton("🧹  PURGE PROXIES  🧹", callback_data="btn_clear_proxies")],
-        [InlineKeyboardButton("⛓️  ADD PROXIES  🕷️", callback_data="btn_add_proxies"),
-         InlineKeyboardButton("🔑   ACCESS  🔑", callback_data="btn_my_key")],
-        [InlineKeyboardButton("⚔️ ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸  ⚔️️", callback_data="btn_back_main")],
+        [InlineKeyboardButton("🕷️  SUMMON PROXIES  🕷️", callback_data="btn_add_proxies"),
+         InlineKeyboardButton("🔑  DARK ACCESS  🔑", callback_data="btn_my_key")],
+        [InlineKeyboardButton("⚔️ LORD OF DARKNESS ⚔️️", callback_data="btn_back_main")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_mode_menu_markup():
     keyboard = [
-        [InlineKeyboardButton("💠 06 DIGIT  ⚡", callback_data="set_mode_num6"),
-         InlineKeyboardButton("💠  07 DIGIT  ⚡", callback_data="set_mode_num7")],
-        [InlineKeyboardButton("💠  08 DIGIT  ⚡", callback_data="set_mode_num8"),
-         InlineKeyboardButton("💠  09 DIGIT  ⚡", callback_data="set_mode_num9")],
-        [InlineKeyboardButton("❄️ 06 LOWER  💠", callback_data="set_mode_eng6"),
-         InlineKeyboardButton("❄️  07 LOWER  💠", callback_data="set_mode_eng7")],
-        [InlineKeyboardButton("❄️  08 LOWER  💠", callback_data="set_mode_eng8"),
-         InlineKeyboardButton("🆎  06 ALPHA  💎", callback_data="set_mode_abc6")],
-        [InlineKeyboardButton("Ⓜ️  06 MIXED  🧬", callback_data="set_mode_mix6"),
-         InlineKeyboardButton("Ⓜ️  07 MIXED  🧬", callback_data="set_mode_mix7")],
-        [InlineKeyboardButton("Ⓜ️  08 MIXED  🧬", callback_data="set_mode_mix8"),
-         InlineKeyboardButton("📝  CUSTOM SPELL  ✦", callback_data="set_mode_custom")],
-        [InlineKeyboardButton("🔁  RETURN  🦇", callback_data="btn_back_main")],
+        [InlineKeyboardButton("🩸  06 DIGIT  ⚡", callback_data="set_mode_num6"),
+         InlineKeyboardButton("🩸  07 DIGIT  ⚡", callback_data="set_mode_num7")],
+        [InlineKeyboardButton("🩸  08 DIGIT  ⚡", callback_data="set_mode_num8"),
+         InlineKeyboardButton("🩸  09 DIGIT  ⚡", callback_data="set_mode_num9")],
+        [InlineKeyboardButton("🦇  06 LOWER  💠", callback_data="set_mode_eng6"),
+         InlineKeyboardButton("🦇  07 LOWER  💠", callback_data="set_mode_eng7")],
+        [InlineKeyboardButton("🦇  08 LOWER  💠", callback_data="set_mode_eng8"),
+         InlineKeyboardButton("📜  06 ALPHA  💎", callback_data="set_mode_abc6")],
+        [InlineKeyboardButton("💀  06 MIXED  🧬", callback_data="set_mode_mix6"),
+         InlineKeyboardButton("💀  07 MIXED  🧬", callback_data="set_mode_mix7")],
+        [InlineKeyboardButton("💀  08 MIXED  🧬", callback_data="set_mode_mix8"),
+         InlineKeyboardButton("🔮  CUSTOM SPELL  ✦", callback_data="set_mode_custom")],
+        [InlineKeyboardButton("🦇  RETURN TO ALTAR  🦇", callback_data="btn_back_main")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -1198,9 +1200,9 @@ async def start(update, context, *args, **kwargs):
     if not is_user_authorized(user_id):
         context.user_data["waiting_for_paid_key"] = True
         await update.message.reply_text(
-            "🔑 ** Seal Required**\n\n"
-            "You require a  Seal Access Key to enter the realm.\n\n"
-            "📌 Acquire key from  Lord — Telegram: @mzw199761\n\n"
+            "🔑 **Dark Seal Required**\n\n"
+            "You require a Dark Seal Access Key to enter the realm.\n\n"
+            "📌 Acquire key from Dark Lord — Telegram: @mzw199761\n\n"
             "🔮 Send your Access Key below:",
             parse_mode=ParseMode.MARKDOWN)
         return
@@ -1212,26 +1214,26 @@ async def start(update, context, *args, **kwargs):
     active = total - bad
 
     if is_admin(user_id):
-        key_line = "👑 Overlord Access (Infinite)"
+        key_line = "👑 Dark Overlord Access (Infinite)"
     else:
         user_info = paid_users.get(user_id)
         if user_info:
-            key_line = f"🔑  Seal Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
+            key_line = f"🔑 Dark Seal Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
         else:
-            key_line = "🔑  Realm Initiate"
+            key_line = "🔑 Dark Realm Initiate"
 
     if saved_url:
-        text = ("⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦ CONTROL ✦`\n\n"
+        text = ("⚔️ **LORD OF DARKNESS** ⚔️\n`✦ DARK REALM CONTROL ✦`\n\n"
                 f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
                 f"🕷️ Active Proxies: `{active}`\n"
-                f"🧑‍🔧  Workers: `{NUM_WORKERS}`\n"
+                f"⚡ Dark Workers: `{NUM_WORKERS}`\n"
                 f"{key_line}\n"
                 "🔮 Portal: Binding Established ✅")
     else:
-        text = ("⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦  CONTROL ✦`\n\n"
+        text = ("⚔️ **LORD OF DARKNESS** ⚔️\n`✦ DARK REALM CONTROL ✦`\n\n"
                 f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
                 f"🕷️ Active Proxies: `{active}`\n"
-                f"🧑‍🔧  Workers: `{NUM_WORKERS}`\n"
+                f"⚡ Dark Workers: `{NUM_WORKERS}`\n"
                 f"{key_line}\n"
                 "❌ Portal missing. Press `PORTAL REALM` button to set.")
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN,
@@ -1245,7 +1247,7 @@ async def start(update, context, *args, **kwargs):
 @admin_only
 async def genkey_command(update, context, *args, **kwargs):
     await update.message.reply_text(
-        "👑 **Thank You For Use**\n"
+        "👑 **LORD OF DARKNESS • SEAL CREATION**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Send format in this order:\n\n"
         "```\n"
@@ -1285,7 +1287,7 @@ async def reloadkeys_command(update, context, *args, **kwargs):
     try:
         keys = load_paid_keys_local()
         await update.message.reply_text(
-            f"✅ ** Seals Reloaded**\n\n"
+            f"✅ **Dark Seals Reloaded**\n\n"
             f"📊 Total seals: `{len(keys)}`",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_main_menu_markup())
@@ -1374,7 +1376,7 @@ async def handle_genkey_input(update, context):
         return
 
     status = await update.message.reply_text(
-        f"⏳ **Forging {count}  Seals...**\n\n"
+        f"⏳ **Forging {count} Dark Seals...**\n\n"
         f"⏰ Duration: `{duration_text}`\n"
         f"📦 Plan: `{plan}`\n"
         f"🔤 Prefix: `{prefix}`",
@@ -1402,7 +1404,7 @@ async def handle_genkey_input(update, context):
     keys_text = "\n".join(f"`{k}`" for k in user_keys)
 
     msg = (
-        f"✅ **{count}  SEAL(S) FORGED**\n"
+        f"✅ **{count} DARK SEAL(S) FORGED**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"⏰ Duration: `{duration_text}`\n"
         f"📦 Plan: `{plan}`\n"
@@ -1441,7 +1443,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
 
     if not is_user_authorized(user_id) and data != "btn_my_key":
         await query.edit_message_text(
-            "🔑 ** Seal Required**\n\n"
+            "🔑 **Dark Seal Required**\n\n"
             "Acquire access key from Overlord — Telegram: @mzw199761\n\n"
             "🔮 Send your Access Key in `/start`.",
             parse_mode=ParseMode.MARKDOWN)
@@ -1460,20 +1462,20 @@ async def handle_callbacks(update, context, *args, **kwargs):
         context.user_data["waiting_for_genkey"] = False
         saved_url = get_user_data(user_id)
         if is_admin(user_id):
-            key_line = "👑  Overlord Access (Infinite)"
+            key_line = "👑 Dark Overlord Access (Infinite)"
         else:
             user_info = paid_users.get(user_id)
             if user_info:
-                key_line = f"🔑  Seal Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
+                key_line = f"🔑 Dark Seal Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
             else:
-                key_line = "🔑  Realm Initiate"
+                key_line = "🔑 Dark Realm Initiate"
         portal_line = "🔮 Portal: Binding Established ✅" if saved_url else \
             "❌ Portal missing. Press `PORTAL REALM` button."
         await query.edit_message_text(
-            "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦ CONTROL ✦`\n\n"
+            "⚔️ **LORD OF DARKNESS** ⚔️\n`✦ DARK REALM CONTROL ✦`\n\n"
             f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
             f"🕷️ Active Proxies: `{active}`\n"
-            f"🧑‍🔧  Workers: `{NUM_WORKERS}`\n"
+            f"⚡ Dark Workers: `{NUM_WORKERS}`\n"
             f"{key_line}\n{portal_line}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_main_menu_markup())
@@ -1482,7 +1484,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
     if data == "btn_back_mode":
         context.user_data["waiting_for_digit"] = False
         await query.edit_message_text(
-            "📜 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SELECT SPELL MODE**",
+            "📜 **LORD OF DARKNESS • SELECT SPELL MODE**",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_mode_menu_markup())
         return
@@ -1490,7 +1492,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
     if data == "btn_genkey_more":
         context.user_data["waiting_for_genkey"] = True
         await query.edit_message_text(
-            "👑 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SEAL CREATION**\n\n"
+            "👑 **LORD OF DARKNESS • SEAL CREATION**\n\n"
             "Format: `<time> <plan> <count> [prefix]`\n\n"
             "**Example:** `1h premium 5`",
             parse_mode=ParseMode.MARKDOWN,
@@ -1507,14 +1509,14 @@ async def handle_callbacks(update, context, *args, **kwargs):
         if new_mode == "custom":
             context.user_data["waiting_for_digit"] = True
             await query.edit_message_text(
-                "🔮 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • CUSTOM SPELL**\n\n"
+                "🔮 **LORD OF DARKNESS • CUSTOM SPELL**\n\n"
                 "Send starting digit sequence (0-9):",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=get_back_markup("btn_back_mode"))
             return
         await query.edit_message_text(
-            f"✅  Spell Mode Inscribed!\n\n"
-            "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦  CONTROL ✦`\n\n"
+            f"✅ Dark Spell Mode Inscribed!\n\n"
+            "⚔️ **LORD OF DARKNESS** ⚔️\n`✦ DARK REALM CONTROL ✦`\n\n"
             f"📜 Active Spell Mode: `{MODES.get(mode, mode)}`\n"
             f"🕷️ Active Proxies: `{active}`",
             parse_mode=ParseMode.MARKDOWN,
@@ -1525,8 +1527,8 @@ async def handle_callbacks(update, context, *args, **kwargs):
     if data == "btn_update_portal":
         context.user_data["waiting_for_portal_url"] = True
         await query.edit_message_text(
-            "🔮 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • PORTAL LINK**\n\n"
-            "Send  Portal URL.\n"
+            "🔮 **LORD OF DARKNESS • PORTAL BINDING**\n\n"
+            "Send target Portal URL.\n"
             "Example:\n"
             "`https://portal-as.ruijienetworks.com/...?mac=xxxx&...`",
             parse_mode=ParseMode.MARKDOWN,
@@ -1536,7 +1538,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
     # MODE MENU
     if data == "btn_mode_menu":
         await query.edit_message_text(
-            "📜 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SELECT SPELL MODE**",
+            "📜 **LORD OF DARKNESS • SELECT SPELL MODE**",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_mode_menu_markup())
         return
@@ -1545,7 +1547,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
     if data == "btn_add_proxies":
         context.user_data["waiting_for_proxy_text"] = True
         await query.edit_message_text(
-            "🕷️️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • PROXY **\n\n"
+            "🕷️️ **LORD OF DARKNESS • PROXY NEXUS**\n\n"
             "Format:\n"
             "```\n"
             "123.45.67.89:8080\n"
@@ -1594,7 +1596,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
 
     # SCANNER
     if data == "btn_start_scanner":
-        await query.edit_message_text("⚡ Initiating  Ritual Scanner...")
+        await query.edit_message_text("⚡ Initiating Dark Ritual Scanner...")
         asyncio.get_event_loop().create_task(run_user_scanner(context, user_id))
         return
 
@@ -1603,7 +1605,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
         if state and not state["stop_event"].is_set():
             state["stop_event"].set()
             await query.edit_message_text(
-                "🛑  Ritual Terminated!",
+                "🛑 Dark Ritual Terminated!",
                 reply_markup=get_back_markup("btn_back_main"))
         else:
             await query.edit_message_text(
@@ -1614,18 +1616,18 @@ async def handle_callbacks(update, context, *args, **kwargs):
     # MY KEY
     if data == "btn_my_key":
         if is_admin(user_id):
-            text = "👑 ** Overlord Access**\n\n🔓 Eternal Authority\n🔑 Key Not Required"
+            text = "👑 **Dark Overlord Access**\n\n🔓 Eternal Authority\n🔑 Key Not Required"
         else:
             user_info = paid_users.get(user_id)
             if user_info:
                 text = (
-                    "🔑 **Your  Seal Pact**\n\n"
+                    "🔑 **Your Dark Seal Pact**\n\n"
                     f"📦 Plan: `{user_info['plan']}`\n"
                     f"📅 Expiration: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M:%S')}`\n"
                     f"🔐 Seal Code: `{user_info['key'][:8]}...{user_info['key'][-4:]}`"
                 )
             else:
-                text = "❌ **No Active  Seal Found**\n\nAcquire pact — Telegram: @mzw199761"
+                text = "❌ **No Active Dark Seal Found**\n\nAcquire pact — Telegram: @mzw199761"
         await query.edit_message_text(
             text, parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_back_markup("btn_back_main"))
@@ -1647,24 +1649,24 @@ async def handle_text(update, context, *args, **kwargs):
         context.user_data["waiting_for_paid_key"] = False
         if is_admin(user_id):
             await update.message.reply_text(
-                "👑 ** Overlord Access Granted**\n\n⚡ Control Panel Awakened ⚡",
+                "👑 **Dark Overlord Access Granted**\n\n⚡ Dark Control Panel Awakened ⚡",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=get_main_menu_markup())
             return
         result = validate_paid_key(raw_text)
         if result is None:
             await update.message.reply_text(
-                "❌ **Invalid  Seal Key**\n\nAcquire pact — Telegram: @mzw199761",
+                "❌ **Invalid Dark Seal Key**\n\nAcquire pact — Telegram: @mzw199761",
                 parse_mode=ParseMode.MARKDOWN)
             return
         if not result["valid"]:
             await update.message.reply_text(
-                f"⏰ ** Seal Has Expired**\nExpired: `{result['expiry'].strftime('%Y-%m-%d %H:%M')}`",
+                f"⏰ **Dark Seal Has Expired**\nExpired: `{result['expiry'].strftime('%Y-%m-%d %H:%M')}`",
                 parse_mode=ParseMode.MARKDOWN)
             return
         register_paid_user(user_id, raw_text, result["expiry"], result["plan"])
         await update.message.reply_text(
-            f"✅ ** Seal Verified!**\n\n"
+            f"✅ **Dark Seal Verified!**\n\n"
             f"📦 Plan: `{result['plan']}`\n"
             f"📅 Expiration: `{result['expiry'].strftime('%Y-%m-%d %H:%M:%S')}`",
             parse_mode=ParseMode.MARKDOWN,
@@ -1683,7 +1685,7 @@ async def handle_text(update, context, *args, **kwargs):
     if not is_user_authorized(user_id):
         context.user_data["waiting_for_paid_key"] = True
         await update.message.reply_text(
-            "🔑 **Seal Key Required**\n\n"
+            "🔑 **Dark Seal Key Required**\n\n"
             "Acquire pact — Telegram: @mzw199761\n\n"
             "🔮 Send your Access Key:",
             parse_mode=ParseMode.MARKDOWN)
@@ -1702,7 +1704,7 @@ async def handle_text(update, context, *args, **kwargs):
         total, bad = pm.stats()
         active = total - bad
         msg = (
-            "✅ **Proxies Bound **\n"
+            "✅ **Proxies Bound to Darkness**\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"➕ Added Thralls: `{added}`\n"
             f"❌ Banished Invalid: `{invalid}`\n"
@@ -1728,8 +1730,8 @@ async def handle_text(update, context, *args, **kwargs):
             pass
         total, bad = pm.stats()
         await update.message.reply_text(
-            "✅ **Portal  Saved**\n\n"
-            "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n"
+            "✅ **Portal Binding Saved**\n\n"
+            "⚔️ **LORD OF DARKNESS** ⚔️\n"
             f"📜 Spell Mode: `{MODES.get(mode, mode)}`\n"
             f"🕷️ Active Proxies: `{total - bad}`",
             parse_mode=ParseMode.MARKDOWN,
@@ -1757,19 +1759,19 @@ async def handle_text(update, context, *args, **kwargs):
     saved_url = get_user_data(user_id)
     total, bad = pm.stats()
     if is_admin(user_id):
-        key_line = "👑  Overlord Access"
+        key_line = "👑 Dark Overlord Access"
     else:
         user_info = paid_users.get(user_id)
         if user_info:
             key_line = f"🔑 Pact Expires: `{user_info['expiry'].strftime('%Y-%m-%d %H:%M')}`"
         else:
-            key_line = "🔑  Realm Initiate"
+            key_line = "🔑 Dark Realm Initiate"
     portal_line = "🔮 Portal: Binding Established ✅" if saved_url else "❌ Portal missing — Set Portal"
     await update.message.reply_text(
-        "⚔️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸** ⚔️\n`✦ CONTROL ✦`\n\n"
+        "⚔️ **LORD OF DARKNESS** ⚔️\n`✦ DARK REALM CONTROL ✦`\n\n"
         f"📜 Spell Mode: `{MODES.get(mode, mode)}`\n"
         f"🕷️ Active Proxies: `{total - bad}`\n"
-        f"🧑‍🔧 Workers: `{NUM_WORKERS}`\n"
+        f"⚡ Dark Workers: `{NUM_WORKERS}`\n"
         f"{key_line}\n{portal_line}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=get_main_menu_markup())
@@ -1782,29 +1784,39 @@ async def handle_text(update, context, *args, **kwargs):
 def main():
     ensure_files_exist()
     load_registered_users()
-    app = Application.builder().token(BOT_TOKEN).build()
+    app1 = Application.builder().token(BOT_TOKEN1).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("genkey", genkey_command))
-    app.add_handler(CommandHandler("cancel", cancel_command))
-    app.add_handler(CommandHandler("reloadkeys", reloadkeys_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(CallbackQueryHandler(handle_callbacks))
+    app1.add_handler(CommandHandler("start", start))
+    app1.add_handler(CommandHandler("genkey", genkey_command))
+    app1.add_handler(CommandHandler("cancel", cancel_command))
+    app1.add_handler(CommandHandler("reloadkeys", reloadkeys_command))
+    app1.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app1.add_handler(CallbackQueryHandler(handle_callbacks))
+app2 = Application.builder().token(BOT_TOKEN2).build()
 
-    pm = get_proxy_manager()
-    total, bad = pm.stats()
-    active = total - bad
-    print(bgreen + f"[MAIN] Proxy Manager: {active} active / {total} total" + reset)
-    print(bgreen + f"[MAIN] Paid users: {len(paid_users)}" + reset)
-    print(bgreen + f"[MAIN] Admin IDs: {ADMIN_IDS}" + reset)
-    print(bgreen + f"[MAIN] ⚡ NUM_WORKERS: {NUM_WORKERS}" + reset)
-    print(bgreen + f"[MAIN] ⚡ PROXY_MAX_FAILS: {PROXY_MAX_FAILS}" + reset)
-    print(bgreen + f"[MAIN] ⚡ TIMEOUT_SEC: {TIMEOUT_SEC}" + reset)
-    print(bgreen + f"[MAIN] ⚡ CHARSET_MIX: {CHARSET_MIX}" + reset)
+app2.add_handler(CommandHandler("start", start))
+app2.add_handler(CommandHandler("genkey", genkey_command))
+app2.add_handler(CommandHandler("cancel", cancel_command))
+app2.add_handler(CommandHandler("reloadkeys", reloadkeys_command))
+app2.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app2.add_handler(CallbackQueryHandler(handle_callbacks))
 
-    print("⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ Bot is running...")
-    app.run_polling(drop_pending_updates=True)
-    print(" awaits your return — Telegram @mzw199761")
+
+pm = get_proxy_manager()
+total, bad = pm.stats()
+active = total - bad
+print(bgreen + f"[MAIN] Proxy Manager: {active} active / {total} total" + reset)
+print(bgreen + f"[MAIN] Paid users: {len(paid_users)}" + reset)
+print(bgreen + f"[MAIN] Admin IDs: {ADMIN_IDS}" + reset)
+print(bgreen + f"[MAIN] ⚡ NUM_WORKERS: {NUM_WORKERS}" + reset)
+print(bgreen + f"[MAIN] ⚡ PROXY_MAX_FAILS: {PROXY_MAX_FAILS}" + reset)
+print(bgreen + f"[MAIN] ⚡ TIMEOUT_SEC: {TIMEOUT_SEC}" + reset)
+print(bgreen + f"[MAIN] ⚡ CHARSET_MIX: {CHARSET_MIX}" + reset)
+
+print("Lord of Darkness Bot is running...")
+app2.run_polling(drop_pending_updates=True)
+app2.run_polling(drop_pending_updates=True)
+print("Darkness awaits your return — Telegram @mzw199761")
 
 
 # ==============================================================================
