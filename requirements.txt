@@ -1,7 +1,4 @@
-# Required dependencies
-aiohttp>=3.9
-python-telegram-bot>=20.0
-
-# Optional: enables SOCKS proxy and CAPTCHA OCR support
-aiohttp-socks>=0.8
-ddddocr>=1.4
+aiohttp
+aiohttp-socks
+ddddocr
+python-telegram-bot
