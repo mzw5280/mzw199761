@@ -1,4 +1,7 @@
-aiohttp
-aiohttp-socks
-ddddocr
 python-telegram-bot
+aiohttp
+aiohttp_socks
+ddddocr
+numpy
+opencv-python-headless
+requests
