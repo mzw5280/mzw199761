@@ -49,8 +49,8 @@ from telegram.ext import (
 #  CONFIG
 # ==============================================================================
 
-BOT_TOKEN = "8858819080:AAEW1Z1ChOZHayJzXo8s8OObn9n6h5O2L38"
-ADMIN_IDS = [7294591323]
+BOT_TOKEN = "8858819080:AAEQ2yT-sJ4xgFAC677ywX527WMa89ePg0U"
+ADMIN_IDS = "7294591323"
 CONTACT_USERNAME = "@mzw199761"
 CONTACT_LINK = "https://t.me/mzw199761"
 
