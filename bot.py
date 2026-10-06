@@ -45,18 +45,12 @@ from telegram.ext import (
 )
 
 # ==============================================================================
-#  CONFIG (REPLIT SECRETS COMPATIBLE)
+#  CONFIG
 # ==============================================================================
 
-BOT_TOKEN = "8858819080:AAEQ2yT-sJ4xgFAC677ywX527WMa89ePg0U"
-
-# ADMIN_IDS ကို Integer List အဖြစ် စနစ်တကျ ခွဲခြားပြင်ဆင်ခြင်း
-ADMIN_IDS_RAW = os.environ.get('ADMIN_IDS', '')
-ADMIN_IDS = [7294591323]
-if ADMIN_IDS_RAW:
-    for x in ADMIN_IDS_RAW.replace(',', ' ').split():
-        if x.strip().isdigit():
-            ADMIN_IDS.append(int(x.strip()))
+BOT_TOKEN = "
+8858819080:AAEQ2yT-sJ4xgFAC677ywX527WMa89ePg0U"
+ADMIN_ID = 7294591323
 
 # ==============================================================================
 #  FILE PATHS
@@ -73,7 +67,7 @@ OWNER_LICENSE_FILE = "owner_license.txt"
 #  ⚡ SPEED SETTINGS ⚡
 # ==============================================================================
 
-NUM_WORKERS = 100  # Replit အတွက် RAM/CPU လုံလောက်စေရန် Worker ကို ၂၅၀ မှ ၁၀၀ သို့ ညှိထားပါသည်
+NUM_WORKERS = 250
 MAX_CODES_PER_SESSION = 150
 MAX_CODES_PER_SID = 150
 TIMEOUT_SEC = 20
@@ -146,6 +140,7 @@ _proxy_manager = None
 user_scanners = {}
 paid_users = {}
 
+
 # ==============================================================================
 #  AUTO-CREATE FILES
 # ==============================================================================
@@ -166,6 +161,11 @@ def ensure_files_exist():
             except OSError as e:
                 print(bred + f"[AutoCreate] Error: {e}" + reset)
 
+
+# ==============================================================================
+#  BANNER / LICENSE
+# ==============================================================================
+
 def show_banner():
     line = "═" * 60
     print(bred + line)
@@ -174,8 +174,10 @@ def show_banner():
     print(line + reset)
     print(white + "Summoning  & verifying domain authorization..." + reset)
 
+
 def encrypt_key_data(key_str, expiry_str):
     return hashlib.sha256(f"{key_str}:{expiry_str}".encode()).hexdigest()
+
 
 def check_time_integrity():
     now = datetime.datetime.now()
@@ -197,6 +199,7 @@ def check_time_integrity():
     except OSError:
         pass
 
+
 def display_remaining_time(expiry_date):
     now = datetime.datetime.now()
     remaining = int(max((expiry_date - now).total_seconds(), 0))
@@ -211,6 +214,7 @@ def display_remaining_time(expiry_date):
         time_str = f"{minutes} min"
     print(yellow + f"[*]  Pact Remaining: {time_str}  ")
     print(f"[-] Pact Expiration: ({expiry_date.strftime('%Y-%m-%d %H:%M')}) " + reset)
+
 
 def check_approval():
     if not os.path.exists(OWNER_LICENSE_FILE):
@@ -239,6 +243,11 @@ def check_approval():
         print(yellow + f"[License]  Error: {e}" + reset)
     print(bgreen + "[+]  Portal Granted Access!" + reset)
 
+
+# ==============================================================================
+#  PAID KEY SYSTEM
+# ==============================================================================
+
 def parse_key_line(line):
     line = line.strip()
     if not line or line.startswith("#"):
@@ -256,6 +265,7 @@ def parse_key_line(line):
         return {"key_hash": key_hash, "expiry": expiry_str, "plan": plan, "signature": signature}
     except (ValueError, IndexError):
         return None
+
 
 def load_paid_keys_local():
     keys = {}
@@ -280,6 +290,7 @@ def load_paid_keys_local():
         print(bred + f"[PaidKeys] Load Error: {e}" + reset)
     return keys
 
+
 def validate_paid_key(user_key):
     if not user_key:
         return None
@@ -301,6 +312,7 @@ def validate_paid_key(user_key):
         return {"valid": False, "reason": "expired", "expiry": expiry_date}
     return {"valid": True, "expiry": expiry_date, "plan": entry.get("plan", "paid")}
 
+
 def is_user_authorized(user_id):
     if user_id in ADMIN_IDS:
         return True
@@ -311,8 +323,10 @@ def is_user_authorized(user_id):
         return False
     return True
 
+
 def is_admin(user_id):
     return user_id in ADMIN_IDS
+
 
 def register_paid_user(user_id, key, expiry, plan):
     paid_users[user_id] = {"key": key, "expiry": expiry, "plan": plan}
@@ -329,6 +343,7 @@ def register_paid_user(user_id, key, expiry, plan):
             json.dump(data, f, indent=2)
     except OSError:
         pass
+
 
 def load_registered_users():
     fpath = PAID_KEYS_FILE + ".users"
@@ -347,6 +362,11 @@ def load_registered_users():
         print(bgreen + f"[PaidUsers]  Realm Restored {len(paid_users)} Souls" + reset)
     except Exception as e:
         print(yellow + f"[PaidUsers] Load error: {e}" + reset)
+
+
+# ==============================================================================
+#  PROXY MANAGER
+# ==============================================================================
 
 class ProxyManager:
     def __init__(self, file_path):
@@ -486,11 +506,13 @@ class ProxyManager:
     def get_active_count(self):
         return len(self.proxies)
 
+
 def get_proxy_manager():
     global _proxy_manager
     if _proxy_manager is None:
         _proxy_manager = ProxyManager(PROXY_FILE)
     return _proxy_manager
+
 
 def create_connector_for_proxy(proxy):
     if not proxy or not USE_PROXY:
@@ -502,14 +524,21 @@ def create_connector_for_proxy(proxy):
     except Exception:
         return None
 
+
+# ==============================================================================
+#  OCR
+# ==============================================================================
+
 def get_ocr_instance():
     global _ocr_instance
     if _ocr_instance is None:
         _ocr_instance = ddddocr.DdddOcr(show_ad=False)
     return _ocr_instance
 
+
 def ocr_image_bytes_fast(image_bytes):
     return get_ocr_instance().classification(image_bytes)
+
 
 async def solve_captcha_simple_async(session, captcha_url, headers):
     try:
@@ -527,6 +556,11 @@ async def solve_captcha_simple_async(session, captcha_url, headers):
     except Exception:
         return None
 
+
+# ==============================================================================
+#  USER DATA
+# ==============================================================================
+
 def get_user_data(user_id):
     p_file = f"{PORTAL_URL_PATH}{user_id}.txt"
     if os.path.exists(p_file):
@@ -537,15 +571,18 @@ def get_user_data(user_id):
             pass
     return None
 
+
 def generate_random_mac():
     b = random.choice([0x02, 0x06, 0x0A, 0x0E])
     return ":".join(f"{x:02x}" for x in ([b] + [random.randint(0, 255) for _ in range(5)]))
+
 
 def replace_mac(url, new_mac):
     if "mac=" in url:
         return re.sub(r'(?<=mac=)[^&]+', new_mac, url)
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}mac={new_mac}"
+
 
 def build_headers(referer=PORTAL_INDEX):
     return {
@@ -557,6 +594,11 @@ def build_headers(referer=PORTAL_INDEX):
         "Origin": PORTAL_BASE,
         "Referer": referer,
     }
+
+
+# ==============================================================================
+#  GATEWAY / SESSION
+# ==============================================================================
 
 async def get_sid_from_gateway(session, portal_url, user_id):
     mac = generate_random_mac()
@@ -588,6 +630,11 @@ async def get_sid_from_gateway(session, portal_url, user_id):
         return None, final_url
     except Exception:
         return None, None
+
+
+# ==============================================================================
+#  BALANCE
+# ==============================================================================
 
 async def fetch_balance(active_token, code, proxy):
     if not active_token:
@@ -638,6 +685,7 @@ async def fetch_balance(active_token, code, proxy):
             except Exception:
                 pass
 
+
 async def check_balance(active_token, code, user_id, proxy_str):
     try:
         with open(FILE_PATH, "a") as f:
@@ -656,6 +704,11 @@ async def check_balance(active_token, code, user_id, proxy_str):
         except Exception:
             pass
     return plan_name, time_str
+
+
+# ==============================================================================
+#  CORE CHECKER
+# ==============================================================================
 
 async def check_single_access_code(session, code, current_session_id,
                                    login_url, captcha_base_url, verify_url,
@@ -715,6 +768,11 @@ async def check_single_access_code(session, code, current_session_id,
     except Exception:
         return "net"
 
+
+# ==============================================================================
+#  ⚡ OPTIMIZED CODE GENERATOR
+# ==============================================================================
+
 def make_code(mode, start_digit=6, counter=None):
     if mode == "custom" and counter is not None:
         return str(counter).zfill(6)
@@ -746,6 +804,11 @@ def make_code(mode, start_digit=6, counter=None):
         return "".join(random.choices(_CHARSET_ABC_T, k=6))
 
     return "".join(random.choices(_CHARSET_DIGITS_T, k=6))
+
+
+# ==============================================================================
+#  WORKER
+# ==============================================================================
 
 async def worker(worker_id, login_url, captcha_base_url, verify_url, headers, user_id):
     pm = get_proxy_manager()
@@ -858,6 +921,11 @@ async def worker(worker_id, login_url, captcha_base_url, verify_url, headers, us
             break
         await asyncio.sleep(0.005)
 
+
+# ==============================================================================
+#  DASHBOARD
+# ==============================================================================
+
 async def live_dashboard_updater(context, user_id):
     state = user_scanners.get(user_id)
     if state is None:
@@ -888,11 +956,11 @@ async def live_dashboard_updater(context, user_id):
                 max_show = 90
                 if len(hit_lines) > max_show:
                     hidden = len(hit_lines) - max_show
-                    hit_lines_display = [f"... ({hidden} hidden) ..."] + hit_lines[-max_show:]
+                    hit_lines_display = [f"... ({hidden} hidden in ) ..."] + hit_lines[-max_show:]
                 else:
                     hit_lines_display = hit_lines
                 hit_section = (
-                    f"🔨 ** HITS  •  {total_hits}**\n"
+                    f"🔨 * HITS  •  {total_hits}**\n"
                     "╭────────────────────╮\n"
                     + "\n".join(hit_lines_display) + "\n"
                     "╰────────────────────╯"
@@ -937,6 +1005,7 @@ async def live_dashboard_updater(context, user_id):
                     pass
     except asyncio.CancelledError:
         raise
+
 
 async def live_dashboard_updater_final(context, user_id, state):
     pm = get_proxy_manager()
@@ -994,6 +1063,11 @@ async def live_dashboard_updater_final(context, user_id, state):
     except Exception:
         pass
 
+
+# ==============================================================================
+#  RUN SCANNER
+# ==============================================================================
+
 async def run_user_scanner(context, user_id):
     if user_scanners.get(user_id, {}).get("running"):
         return
@@ -1033,7 +1107,7 @@ async def run_user_scanner(context, user_id):
 
     dash = await context.bot.send_message(
         chat_id=user_id,
-        text="🔮 ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸...")
+        text="🔮 Awakening  ritual dashboard...")
     state["dash_msg_id"] = dash.message_id
 
     headers = build_headers()
@@ -1057,19 +1131,25 @@ async def run_user_scanner(context, user_id):
             pass
         state["running"] = False
 
+
+# ==============================================================================
+#  MENU MARKUPS
+# ==============================================================================
+
 def get_main_menu_markup():
     keyboard = [
         [InlineKeyboardButton("🔗  PORTAL   🔮", callback_data="btn_update_portal"),
          InlineKeyboardButton("⚙️  MODES  📜", callback_data="btn_mode_menu")],
         [InlineKeyboardButton("⚡  SCAN  ⚡", callback_data="btn_start_scanner"),
          InlineKeyboardButton("🛑  BANISH SCAN  🛑", callback_data="stop_scan")],
-        [InlineKeyboardButton("👁️  ABYSS STATUS  👁", callback_data="btn_proxy_status"),
+        [InlineKeyboardButton("👁️  ABYSS STATUS  👁️️", callback_data="btn_proxy_status"),
          InlineKeyboardButton("🧹  PURGE PROXIES  🧹", callback_data="btn_clear_proxies")],
         [InlineKeyboardButton("⛓️  ADD PROXIES  🕷️", callback_data="btn_add_proxies"),
          InlineKeyboardButton("🔑   ACCESS  🔑", callback_data="btn_my_key")],
-        [InlineKeyboardButton("⚔️ ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸  ⚔", callback_data="btn_back_main")],
+        [InlineKeyboardButton("⚔️ ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸  ⚔️️", callback_data="btn_back_main")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_mode_menu_markup():
     keyboard = [
@@ -1089,10 +1169,12 @@ def get_mode_menu_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+
 def get_back_markup(callback="btn_back_main"):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🦇  RETURN  🦇", callback_data=callback)]
     ])
+
 
 def admin_only(func):
     async def wrapper(update, context, *args, **kwargs):
@@ -1104,6 +1186,11 @@ def admin_only(func):
             return
         return await func(update, context, *args, **kwargs)
     return wrapper
+
+
+# ==============================================================================
+#  /start
+# ==============================================================================
 
 async def start(update, context, *args, **kwargs):
     user_id = update.effective_user.id
@@ -1150,6 +1237,11 @@ async def start(update, context, *args, **kwargs):
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN,
                                     reply_markup=get_main_menu_markup())
 
+
+# ==============================================================================
+#  /genkey + /cancel + /reloadkeys
+# ==============================================================================
+
 @admin_only
 async def genkey_command(update, context, *args, **kwargs):
     await update.message.reply_text(
@@ -1178,6 +1270,7 @@ async def genkey_command(update, context, *args, **kwargs):
         ]))
     context.user_data["waiting_for_genkey"] = True
 
+
 @admin_only
 async def cancel_command(update, context, *args, **kwargs):
     context.user_data["waiting_for_genkey"] = False
@@ -1185,6 +1278,7 @@ async def cancel_command(update, context, *args, **kwargs):
         "❌ **Ritual Aborted**",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=get_main_menu_markup())
+
 
 @admin_only
 async def reloadkeys_command(update, context, *args, **kwargs):
@@ -1197,6 +1291,7 @@ async def reloadkeys_command(update, context, *args, **kwargs):
             reply_markup=get_main_menu_markup())
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
+
 
 def generate_keys_batch_seconds(duration_seconds, plan, count, prefix):
     import hashlib as _hl
@@ -1218,6 +1313,7 @@ def generate_keys_batch_seconds(duration_seconds, plan, count, prefix):
         user_keys.append(user_key)
         lines.append(line)
     return user_keys, lines
+
 
 async def handle_genkey_input(update, context):
     user_id = update.effective_user.id
@@ -1332,6 +1428,11 @@ async def handle_genkey_input(update, context):
     except Exception:
         pass
 
+
+# ==============================================================================
+#  CALLBACKS
+# ==============================================================================
+
 async def handle_callbacks(update, context, *args, **kwargs):
     query = update.callback_query
     user_id = update.effective_user.id
@@ -1351,6 +1452,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
     total, bad = pm.stats()
     active = total - bad
 
+    # BACK
     if data == "btn_back_main":
         context.user_data["waiting_for_proxy_text"] = False
         context.user_data["waiting_for_portal_url"] = False
@@ -1397,6 +1499,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
             ]))
         return
 
+    # MODE
     if data.startswith("set_mode_"):
         new_mode = data[len("set_mode_"):]
         context.user_data["selected_mode"] = new_mode
@@ -1418,6 +1521,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
             reply_markup=get_main_menu_markup())
         return
 
+    # PORTAL
     if data == "btn_update_portal":
         context.user_data["waiting_for_portal_url"] = True
         await query.edit_message_text(
@@ -1429,6 +1533,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
             reply_markup=get_back_markup("btn_back_main"))
         return
 
+    # MODE MENU
     if data == "btn_mode_menu":
         await query.edit_message_text(
             "📜 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • SELECT SPELL MODE**",
@@ -1436,10 +1541,11 @@ async def handle_callbacks(update, context, *args, **kwargs):
             reply_markup=get_mode_menu_markup())
         return
 
+    # PROXY
     if data == "btn_add_proxies":
         context.user_data["waiting_for_proxy_text"] = True
         await query.edit_message_text(
-            "🕷 **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • PROXY **\n\n"
+            "🕷️️ **⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ • PROXY **\n\n"
             "Format:\n"
             "```\n"
             "123.45.67.89:8080\n"
@@ -1486,8 +1592,9 @@ async def handle_callbacks(update, context, *args, **kwargs):
             reply_markup=get_back_markup("btn_back_main"))
         return
 
+    # SCANNER
     if data == "btn_start_scanner":
-        await query.edit_message_text("⚡ ⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ Scanner...")
+        await query.edit_message_text("⚡ Initiating  Ritual Scanner...")
         asyncio.get_event_loop().create_task(run_user_scanner(context, user_id))
         return
 
@@ -1504,6 +1611,7 @@ async def handle_callbacks(update, context, *args, **kwargs):
                 reply_markup=get_back_markup("btn_back_main"))
         return
 
+    # MY KEY
     if data == "btn_my_key":
         if is_admin(user_id):
             text = "👑 ** Overlord Access**\n\n🔓 Eternal Authority\n🔑 Key Not Required"
@@ -1523,12 +1631,18 @@ async def handle_callbacks(update, context, *args, **kwargs):
             reply_markup=get_back_markup("btn_back_main"))
         return
 
+
+# ==============================================================================
+#  TEXT HANDLER
+# ==============================================================================
+
 async def handle_text(update, context, *args, **kwargs):
     user_id = update.effective_user.id
     raw_text = (update.message.text or "").strip()
     pm = get_proxy_manager()
     mode = context.user_data.get("selected_mode", "num6")
 
+    # PAID KEY
     if context.user_data.get("waiting_for_paid_key"):
         context.user_data["waiting_for_paid_key"] = False
         if is_admin(user_id):
@@ -1557,6 +1671,7 @@ async def handle_text(update, context, *args, **kwargs):
             reply_markup=get_main_menu_markup())
         return
 
+    # GENKEY
     if context.user_data.get("waiting_for_genkey"):
         if not is_admin(user_id):
             context.user_data["waiting_for_genkey"] = False
@@ -1574,6 +1689,7 @@ async def handle_text(update, context, *args, **kwargs):
             parse_mode=ParseMode.MARKDOWN)
         return
 
+    # PROXY
     if context.user_data.get("waiting_for_proxy_text"):
         context.user_data["waiting_for_proxy_text"] = False
         lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
@@ -1597,6 +1713,7 @@ async def handle_text(update, context, *args, **kwargs):
                                         reply_markup=get_main_menu_markup())
         return
 
+    # PORTAL URL
     if context.user_data.get("waiting_for_portal_url"):
         context.user_data["waiting_for_portal_url"] = False
         if not raw_text.lower().startswith(("http://", "https://")):
@@ -1619,6 +1736,7 @@ async def handle_text(update, context, *args, **kwargs):
             reply_markup=get_main_menu_markup())
         return
 
+    # CUSTOM DIGIT
     if context.user_data.get("waiting_for_digit"):
         context.user_data["waiting_for_digit"] = False
         if not raw_text.isdigit():
@@ -1635,6 +1753,7 @@ async def handle_text(update, context, *args, **kwargs):
             reply_markup=get_main_menu_markup())
         return
 
+    # DEFAULT
     saved_url = get_user_data(user_id)
     total, bad = pm.stats()
     if is_admin(user_id):
@@ -1655,14 +1774,14 @@ async def handle_text(update, context, *args, **kwargs):
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=get_main_menu_markup())
 
+
+# ==============================================================================
+#  MAIN
+# ==============================================================================
+
 def main():
     ensure_files_exist()
     load_registered_users()
-    
-    if not BOT_TOKEN:
-        print(bred + "[!] BOT_TOKEN Missing! Set BOT_TOKEN in Replit Secrets." + reset)
-        sys.exit(1)
-
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -1679,9 +1798,18 @@ def main():
     print(bgreen + f"[MAIN] Paid users: {len(paid_users)}" + reset)
     print(bgreen + f"[MAIN] Admin IDs: {ADMIN_IDS}" + reset)
     print(bgreen + f"[MAIN] ⚡ NUM_WORKERS: {NUM_WORKERS}" + reset)
+    print(bgreen + f"[MAIN] ⚡ PROXY_MAX_FAILS: {PROXY_MAX_FAILS}" + reset)
+    print(bgreen + f"[MAIN] ⚡ TIMEOUT_SEC: {TIMEOUT_SEC}" + reset)
+    print(bgreen + f"[MAIN] ⚡ CHARSET_MIX: {CHARSET_MIX}" + reset)
 
     print("⫷[S̲̲̅̅H̲̲̅̅I̲̲̅̅N̲̲̅̅E̲̲̅̅]⫸ Bot is running...")
     app.run_polling(drop_pending_updates=True)
+    print(" awaits your return — Telegram @mzw199761")
+
+
+# ==============================================================================
+#  ENTRY POINT
+# ==============================================================================
 
 show_banner()
 check_approval()
