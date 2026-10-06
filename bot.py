@@ -1608,5 +1608,5 @@ def main():
 if __name__ == "__main__":
     show_banner()
     _proxy_manager = get_proxy_manager()
-    main()et_proxy_manager()
+    main()get_proxy_manager()
     main()
