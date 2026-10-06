@@ -48,9 +48,8 @@ from telegram.ext import (
 #  CONFIG
 # ==============================================================================
 
-BOT_TOKEN = "
-8858819080:AAEQ2yT-sJ4xgFAC677ywX527WMa89ePg0U"
-ADMIN_ID = 7294591323
+BOT_TOKEN ="8858819080:AAEqPA81hAnAOC7BoeKUqm6oT08HmVSzDoE"
+ADMIN_ID ="7294591323"
 
 # ==============================================================================
 #  FILE PATHS
