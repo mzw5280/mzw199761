@@ -5,3 +5,4 @@ ddddocr
 numpy
 opencv-python-headless
 requests
+flask
