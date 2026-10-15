@@ -301,5 +301,5 @@ def load_paid_keys_local():
                 entry = parse_key_line(line)
                 if not entry:
                     continue
-                if encrypt_key_data(entry["key_hash"], entry["expiry"]) != entry["signature"]:
+if encrypt_key_data(entry["key_hash"], entry["expiry"]) != entry["signature"]:
              
