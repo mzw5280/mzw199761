@@ -86,9 +86,9 @@ OWNER_LICENSE_FILE = "owner_license.txt"
 #  ⚡ SPEED SETTINGS ⚡
 # ==============================================================================
 
-NUM_WORKERS = 5
-MAX_CODES_PER_SESSION = 150
-MAX_CODES_PER_SID = 150
+NUM_WORKERS = 1
+MAX_CODES_PER_SESSION = 15
+MAX_CODES_PER_SID = 15
 TIMEOUT_SEC = 10
 
 # Proxy settings
