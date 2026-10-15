@@ -86,7 +86,7 @@ OWNER_LICENSE_FILE = "owner_license.txt"
 #  ⚡ SPEED SETTINGS ⚡
 # ==============================================================================
 
-NUM_WORKERS = 10
+NUM_WORKERS = 5
 MAX_CODES_PER_SESSION = 150
 MAX_CODES_PER_SID = 150
 TIMEOUT_SEC = 10
