@@ -301,5 +301,10 @@ def load_paid_keys_local():
                 entry = parse_key_line(line)
                 if not entry:
                     continue
-if encrypt_key_data(entry["key_hash"], entry["expiry"]) != entry["signature"]:
-             
+                if encrypt_key_data(entry["key_hash"], entry["expiry"]) != entry["signature"]:
+                    continue
+                keys[entry["key_hash"]] = {"expiry": entry["expiry"], "plan": entry["plan"]}
+        print(bgreen + f"[PaidKeys]  Seal Loaded {len(keys)} Keys" + reset)
+    except Exception as e:
+        print(bred + f"[PaidKeys] Load Error: {e}" + reset)
+    return keys
