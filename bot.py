@@ -67,7 +67,7 @@ def keep_alive():
 #  CONFIG
 # ==============================================================================
 
-BOT_TOKEN = "8858819080:AAGHWyQvLtjT482mHXd7fIxmLJoBcRZf9xY"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 ADMIN_IDS = [7294591323]
 
