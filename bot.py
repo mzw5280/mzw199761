@@ -417,23 +417,21 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False)
         return
 
     if any(k in response for k in ['logonUrl', 'success":true', 'success": true', 'authSuccess', 'redirectUrl']):
-        if recheck:
-            return code
-
-        if chat_id not in success_texts:
-            success_texts[chat_id] = []
-            
-        expire_info = await get_expiry_info(session_id, session_url) if session_id else "☠️ Plan: Unknown | ⏳ Time: Unknown"
-        hit_entry = f"💌 {code}\n   {expire_info}"
-        
-        if hit_entry not in success_texts[chat_id]:
+                if hit_entry not in success_texts[chat_id]:
             success_texts[chat_id].append(hit_entry)
             save_hits()
             try:
                 from datetime import datetime
 
-# လက်ရှိအချိန်ကို ရယူရန် (လိုအပ်သလို ပုံစံထုတ်နိုင်ပါတယ်)
-current_time = datetime.now().strftime("%I:%M %p")  # ဥပမာ - 05:02 AM
+                # လက်ရှိအချိန်ကို ရယူရန် (Indentation နေရာလွတ် ညီအောင် ချိန်ပေးထားပါတယ်)
+                current_time = datetime.now().strftime("%I:%M %p")  # ဥပမာ - 05:02 AM
+
+                # မက်ဆေ့ခ်ျတည်ဆောက်ပုံ (expire_info ထဲမှာ Plan ပါပြီးသားဖြစ်လို့ အဲ့အတိုင်း ဆက်သုံးနိုင်ပါတယ်)
+                message_text = f"🔨 HIT FOUND!\n\n💌 {code}\n   {expire_info}\n⏰ Time: {current_time}"
+                await bot.send_message(chat_id, message_text)
+                
+            except Exception as e:
+                print(f"Error sending message: {e}")
 
 # မက်ဆေ့ခ်ျတည်ဆောက်ပုံ
 message_text = f"🔨 HIT FOUND!\n\n💌 {code}\n💌 Plan: {plan} | ⏰ Time: {current_time}"
